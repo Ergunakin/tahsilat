@@ -17,21 +17,28 @@ export default function Register() {
       setLoading(false)
       return
     }
-    const { data: company, error: compErr } = await supabase
-      .from('companies')
-      .insert({ name: companyName, slug, email })
-      .select('*')
-      .single()
-    if (compErr || !company) {
-      setError(compErr?.message ?? 'Şirket oluşturma hatası')
+    // Sign in to ensure authenticated role for subsequent inserts
+    const { error: loginErr } = await supabase.auth.signInWithPassword({ email, password })
+    if (loginErr) {
+      setError(loginErr.message.includes('Email not confirmed') ? 'E-posta doğrulaması gerekli. Lütfen e-postanı kontrol et.' : loginErr.message)
       setLoading(false)
       return
     }
+    const { error: compErr } = await supabase
+      .from('companies')
+      .insert({ name: companyName, slug, email })
+    if (compErr) {
+      setError(compErr.message)
+      setLoading(false)
+      return
+    }
+    const { data: cid } = await supabase.rpc('get_company_id_by_slug', { s: slug })
     await supabase.from('users').insert({
+      id: data.user.id,
       email,
       full_name: email.split('@')[0],
       role: 'admin',
-      company_id: company.id,
+      company_id: cid as string,
     })
     setLoading(false)
     window.location.assign(`/${slug}/dashboard`)

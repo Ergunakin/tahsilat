@@ -10,9 +10,36 @@ export default function Login() {
     e.preventDefault()
     setLoading(true)
     const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) {
+      setError(error.message)
+      setLoading(false)
+      return
+    }
+    const { data: userData } = await supabase.auth.getUser()
+    const uid = userData.user?.id
+    if (!uid) {
+      setLoading(false)
+      window.location.assign('/')
+      return
+    }
+    const { data: userRow } = await supabase
+      .from('users')
+      .select('company_id')
+      .eq('id', uid)
+      .maybeSingle()
+    if (!userRow?.company_id) {
+      setLoading(false)
+      window.location.assign('/')
+      return
+    }
+    const { data: company } = await supabase
+      .from('companies')
+      .select('slug')
+      .eq('id', userRow.company_id)
+      .maybeSingle()
     setLoading(false)
-    if (error) setError(error.message)
-    else window.location.assign('/')
+    const slug = company?.slug
+    window.location.assign(slug ? `/${slug}/dashboard` : '/')
   }
   return (
     <div className="min-h-screen flex items-center justify-center">
@@ -26,4 +53,3 @@ export default function Login() {
     </div>
   )
 }
-
