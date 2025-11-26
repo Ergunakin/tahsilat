@@ -11,7 +11,7 @@ function genPassword() {
 
 export default function Users() {
   const { company } = useTenant()
-  const apiBase = import.meta.env.DEV ? ((import.meta.env.VITE_API_BASE_URL as string) || '') : ''
+  const apiBase = ''
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Role>('seller')
@@ -52,7 +52,7 @@ export default function Users() {
     setMsg(null)
     if (!company?.id) { setMsg('Şirket yüklenmedi'); return }
     try {
-      const resp = await fetch(`${apiBase}/api/users/create`, {
+      const resp = await fetch(`/api/users/create`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ full_name: fullName, email, role, company_id: company.id })
       })
@@ -73,7 +73,7 @@ export default function Users() {
     if (!company?.id) { setMsg('Şirket yüklenmedi'); return }
     const items = bulkItems.map(i => ({ full_name: i.full_name, email: i.email, role: i.role }))
     try {
-      const resp = await fetch(`${apiBase}/api/users/bulk`, {
+      const resp = await fetch(`/api/users/bulk`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company_id: company.id, items })
       })
