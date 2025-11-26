@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '../utils/supabaseAdmin'
+import { getSupabaseAdmin } from '../utils/supabaseAdmin'
 
 function genPassword() {
   const n = Math.floor(100000 + Math.random() * 900000)
@@ -11,6 +11,8 @@ export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+  const admin = getSupabaseAdmin()
+  if (!admin) return res.status(500).json({ error: 'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY' })
   const { company_id, items } = req.body || {}
   if (!company_id || !Array.isArray(items)) return res.status(400).json({ error: 'Missing company_id or items' })
   const created: any[] = []
@@ -22,7 +24,7 @@ export default async function handler(req: any, res: any) {
     const role = roleMap[roleLabel] || roleLabel
     if (!full_name || !email || !role) continue
     const password = genPassword()
-    const { data: adminCreate, error: adminErr } = await supabaseAdmin.auth.admin.createUser({
+    const { data: adminCreate, error: adminErr } = await admin.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
@@ -33,7 +35,7 @@ export default async function handler(req: any, res: any) {
       continue
     }
     const uid = adminCreate.user.id
-    const { error: insertErr } = await supabaseAdmin
+    const { error: insertErr } = await admin
       .from('users')
       .insert({ id: uid, email, full_name, role, company_id })
     if (insertErr) {

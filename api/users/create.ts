@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '../utils/supabaseAdmin'
+import { getSupabaseAdmin } from '../utils/supabaseAdmin'
 
 function genPassword() {
   const n = Math.floor(100000 + Math.random() * 900000)
@@ -11,22 +11,28 @@ export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+  const admin = getSupabaseAdmin()
+  if (!admin) return res.status(500).json({ error: 'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY' })
   const { full_name, email, role, company_id } = req.body || {}
   if (!full_name || !email || !role || !company_id) {
     return res.status(400).json({ error: 'Missing fields' })
   }
   const password = genPassword()
-  const { data: created, error: adminErr } = await supabaseAdmin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: { full_name, role, company_id }
-  })
-  if (adminErr || !created.user) return res.status(500).json({ error: adminErr?.message || 'Admin create failed' })
-  const uid = created.user.id
-  const { error: insertErr } = await supabaseAdmin
-    .from('users')
-    .insert({ id: uid, email, full_name, role, company_id })
-  if (insertErr) return res.status(500).json({ error: insertErr.message })
-  return res.status(200).json({ id: uid, email, full_name, role, company_id, password })
+  try {
+    const { data: created, error: adminErr } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name, role, company_id }
+    })
+    if (adminErr || !created.user) return res.status(500).json({ error: adminErr?.message || 'Admin create failed' })
+    const uid = created.user.id
+    const { error: insertErr } = await admin
+      .from('users')
+      .insert({ id: uid, email, full_name, role, company_id })
+    if (insertErr) return res.status(500).json({ error: insertErr.message })
+    return res.status(200).json({ id: uid, email, full_name, role, company_id, password })
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || 'Server error' })
+  }
 }
