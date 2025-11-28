@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from '../utils/supabaseAdmin'
+import { getSupabaseAdmin } from '../utils/supabaseAdmin.js'
 
 function genPassword() {
   const n = Math.floor(100000 + Math.random() * 900000)
