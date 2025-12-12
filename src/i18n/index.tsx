@@ -203,11 +203,11 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   return <I18nCtx.Provider value={v}>{children}</I18nCtx.Provider>
 }
 
-export function useI18n() {
+export function useI18n(): { lang: Lang; t: (k: string) => string; setLang: (l: Lang) => void } {
   try {
     return React.useContext(I18nCtx)
   } catch {
-    return { lang: 'tr', t: (k: string) => k, setLang: () => {} }
+    return { lang: 'tr' as Lang, t: (k: string) => k, setLang: (_l: Lang) => {} }
   }
 }
 
