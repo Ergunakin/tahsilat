@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase'
 import Payments from '@/pages/Payments'
 import Settings from '@/pages/Settings'
 import CalendarPage from '@/pages/Calendar'
+import Receivables from '@/pages/Receivables'
 import TenantLayout from '@/components/TenantLayout'
 import Dashboard from '@/pages/Dashboard'
 import Customers from '@/pages/Customers'
@@ -71,6 +72,7 @@ export default function App() {
           <Route path="dashboard" element={<TenantGate><Protected><TenantLayout><Dashboard /></TenantLayout></Protected></TenantGate>} />
           <Route path="customers" element={<TenantGate><Protected><TenantLayout><Customers /></TenantLayout></Protected></TenantGate>} />
           <Route path="customers/:id" element={<TenantGate><Protected><TenantLayout><Empty title={"Customer Detail"} /></TenantLayout></Protected></TenantGate>} />
+          <Route path="receivables" element={<TenantGate><Protected><TenantLayout><Receivables /></TenantLayout></Protected></TenantGate>} />
           <Route path="payments" element={<TenantGate><Protected><TenantLayout><Payments /></TenantLayout></Protected></TenantGate>} />
           <Route path="calendar" element={<TenantGate><Protected><TenantLayout><CalendarPage /></TenantLayout></Protected></TenantGate>} />
           <Route path="users" element={<TenantGate><Protected><TenantLayout><Users /></TenantLayout></Protected></TenantGate>} />

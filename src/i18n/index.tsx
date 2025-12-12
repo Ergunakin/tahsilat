@@ -16,6 +16,7 @@ const dict: Record<Lang, Record<string, string>> = {
     logout: 'Çıkış',
     nav_dashboard: 'Pano',
     nav_customers: 'Müşteriler',
+    nav_receivables: 'Alacaklar',
     nav_payments: 'Ödemeler',
     nav_settings: 'Ayarlar',
     nav_users: 'Kullanıcılar',
@@ -72,6 +73,27 @@ const dict: Record<Lang, Record<string, string>> = {
     role_manager: 'Satış Yöneticisi',
     role_accountant: 'Muhasebe',
     role_admin: 'Yönetici',
+    customer: 'Müşteri',
+    due_date: 'Vade Tarihi',
+    amount: 'Alacak Tutarı',
+    currency: 'Para Birimi',
+    debt_type: 'Alacak Tipi',
+    seller: 'Satış Temsilcisi',
+    transaction_date: 'İşlem Tarihi (opsiyonel)',
+    save_debt: 'Alacak Kaydet',
+    debt_saved: 'Alacak kaydedildi',
+    select_placeholder: 'Seçin',
+    debts_list_title: 'Mevcut Alacaklar',
+    debt_status: 'Durum',
+    created_at: 'Oluşturulma',
+    receivable_type_senet: 'Senet',
+    receivable_type_cek: 'Çek',
+    receivable_type_havale: 'Havale',
+    settings_currencies_label: 'Para Birimleri (virgül ile)',
+    settings_receivable_types_label: 'Alacak Tipleri (virgül ile)',
+    saved: 'Kaydedildi',
+    receivables_bulk_title: 'Toplu Alacak Yükleme (Excel)',
+    bulk_receivables_create: 'Alacakları ekle',
   },
   en: {
     app_title: 'New Project',
@@ -90,6 +112,7 @@ const dict: Record<Lang, Record<string, string>> = {
     nav_settings: 'Settings',
     nav_users: 'Users',
     nav_calendar: 'Calendar',
+    nav_receivables: 'Receivables',
     company_home: 'Company Home',
     dashboard_title: 'Dashboard',
     card_customers: 'Customers',
@@ -142,6 +165,27 @@ const dict: Record<Lang, Record<string, string>> = {
     role_manager: 'Manager',
     role_accountant: 'Accountant',
     role_admin: 'Admin',
+    customer: 'Customer',
+    due_date: 'Due Date',
+    amount: 'Receivable Amount',
+    currency: 'Currency',
+    debt_type: 'Receivable Type',
+    seller: 'Sales Rep',
+    transaction_date: 'Transaction Date (optional)',
+    save_debt: 'Save Receivable',
+    debt_saved: 'Receivable saved',
+    select_placeholder: 'Select',
+    debts_list_title: 'Existing Receivables',
+    debt_status: 'Status',
+    created_at: 'Created',
+    receivable_type_senet: 'Promissory Note',
+    receivable_type_cek: 'Check',
+    receivable_type_havale: 'Wire Transfer',
+    settings_currencies_label: 'Currencies (comma-separated)',
+    settings_receivable_types_label: 'Receivable Types (comma-separated)',
+    saved: 'Saved',
+    receivables_bulk_title: 'Bulk Receivables Upload (Excel)',
+    bulk_receivables_create: 'Add Receivables',
   }
 }
 
@@ -171,4 +215,14 @@ export function tGlobal(key: string) {
   const lang = (typeof localStorage !== 'undefined' && (localStorage.getItem('lang') as 'tr'|'en'|null)) || 'tr'
   const d = dict[lang as 'tr'|'en']
   return d[key] ?? key
+}
+
+export function formatDateDisplay(d: string | Date | undefined, lang: 'tr' | 'en') {
+  if (!d) return '—'
+  const date = (d instanceof Date) ? d : new Date(d)
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  if (lang === 'tr') return `${day}/${m}/${y}`
+  return `${y}-${m}-${day}`
 }

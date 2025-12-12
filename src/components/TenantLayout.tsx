@@ -21,6 +21,7 @@ export default function TenantLayout({ children }: { children: React.ReactNode }
           <nav className="flex items-center gap-4 text-sm">
             <Link to={`/${slug}/dashboard`} className="hover:underline">{t('nav_dashboard')}</Link>
             <Link to={`/${slug}/customers`} className="hover:underline">{t('nav_customers')}</Link>
+            <Link to={`/${slug}/receivables`} className="hover:underline">{t('nav_receivables')}</Link>
             <Link to={`/${slug}/payments`} className="hover:underline">{t('nav_payments')}</Link>
             <Link to={`/${slug}/users`} className="hover:underline">{t('nav_users')}</Link>
             <Link to={`/${slug}/settings`} className="hover:underline">{t('nav_settings')}</Link>
