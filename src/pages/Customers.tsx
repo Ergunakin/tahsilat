@@ -47,28 +47,8 @@ export default function Customers() {
             overdue[cid][cur] = (overdue[cid][cur] || 0) + ov
           })
         } else {
-          const { data: debts } = await supabase
-            .from('debts')
-            .select('customer_id,currency,remaining_amount,due_date,status')
-            .eq('company_id', company.id)
           totals = {}
           overdue = {}
-          const now = Date.now()
-          (debts ?? []).forEach((d: any) => {
-            const cid = d.customer_id as string
-            const cur = d.currency as string
-            const amt = Number(d.remaining_amount) || 0
-            if (!totals[cid]) totals[cid] = {}
-            if (!totals[cid][cur]) totals[cid][cur] = 0
-            totals[cid][cur] += amt
-            const dueTs = d.due_date ? new Date(d.due_date).getTime() : 0
-            const isActive = d.status === 'active' || d.status === 'partial'
-            if (isActive && dueTs && dueTs < now) {
-              if (!overdue[cid]) overdue[cid] = {}
-              if (!overdue[cid][cur]) overdue[cid][cur] = 0
-              overdue[cid][cur] += amt
-            }
-          })
         }
         setTotalsByCurrency(totals)
         setOverdueByCurrency(overdue)
