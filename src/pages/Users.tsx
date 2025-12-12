@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTenant } from '@/stores/tenant'
 import * as XLSX from 'xlsx'
+import { supabase } from '@/lib/supabase'
+import { useI18n } from '@/i18n'
 
 type Role = 'admin' | 'manager' | 'seller' | 'accountant'
 
@@ -9,9 +11,41 @@ function genPassword() {
   return String(n)
 }
 
+interface UserRow {
+  id: string
+  full_name: string
+  email: string
+  role: Role
+  manager_id?: string | null
+}
+
 export default function Users() {
   const { company } = useTenant()
   const apiBase = ''
+  const [bulkResult, setBulkResult] = useState<any[]>([])
+  const [users, setUsers] = useState<UserRow[]>([])
+  const managers = useMemo(() => users.filter(u => u.role === 'manager' || u.role === 'admin').sort((a,b)=>a.full_name.localeCompare(b.full_name)), [users])
+  const sellers = useMemo(() => users.filter(u => u.role === 'seller').sort((a,b)=>a.full_name.localeCompare(b.full_name)), [users])
+  const [savingId, setSavingId] = useState<string | null>(null)
+  const [assignError, setAssignError] = useState<string | null>(null)
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [targetManager, setTargetManager] = useState<string>('')
+  const [selectedSellerIds, setSelectedSellerIds] = useState<string[]>([])
+  const [assignBusy, setAssignBusy] = useState(false)
+  const managerNameMap = useMemo(() => Object.fromEntries(users.map(u => [u.id, u.full_name])), [users])
+
+  useEffect(() => {
+    const loadUsers = async () => {
+      if (!company?.id) return
+      const { data } = await supabase
+        .from('users')
+        .select('id,full_name,email,role,manager_id')
+        .eq('company_id', company.id)
+        .order('full_name', { ascending: true })
+      setUsers((data as any) ?? [])
+    }
+    loadUsers()
+  }, [company?.id])
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Role>('seller')
@@ -19,11 +53,12 @@ export default function Users() {
   const [msg, setMsg] = useState<string | null>(null)
   const [bulkItems, setBulkItems] = useState<any[]>([])
 
+  const { t, lang } = useI18n()
   useEffect(() => { setPassword(genPassword()) }, [fullName, email, role])
 
   const templateData = useMemo(() => (
-    [{ 'Ad Soyad': 'Ad Soyad', 'email': 'ornek@example.com', '6 haneli şifre': 'otomatik', 'rol': 'satıcı|muhasebe|yönetici' }]
-  ), [])
+    [{ [t('full_name')]: t('full_name'), [t('email')]: 'ornek@example.com', '6 haneli şifre': 'otomatik', 'rol': 'satıcı|muhasebe|yönetici' }]
+  ), [lang])
 
   const downloadTemplate = () => {
     const ws = XLSX.utils.json_to_sheet(templateData)
@@ -48,6 +83,14 @@ export default function Users() {
     setBulkItems(mapped)
   }
 
+  const downloadResults = () => {
+    if (!bulkResult.length) return
+    const ws = XLSX.utils.json_to_sheet(bulkResult)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Sonuclar')
+    XLSX.writeFile(wb, 'kullanici_yukleme_sonuclari.xlsx')
+  }
+
   const submitSingle = async () => {
     setMsg(null)
     if (!company?.id) { setMsg('Şirket yüklenmedi'); return }
@@ -61,6 +104,14 @@ export default function Users() {
       const json = isJson ? await resp.json() : { error: await resp.text() }
       if (!resp.ok) { setMsg(json.error || 'Hata'); return }
       setMsg(`Kullanıcı oluşturuldu: ${json.email} | Geçici şifre: ${json.password}`)
+      const newUser: UserRow = {
+        id: json.id,
+        full_name: json.full_name || fullName,
+        email: json.email || email,
+        role,
+        manager_id: null,
+      }
+      setUsers(prev => [...prev, newUser].sort((a,b)=>a.full_name.localeCompare(b.full_name)))
     } catch (e: any) {
       setMsg(`İstek başarısız: ${e?.message || 'network error'}`)
       return
@@ -81,49 +132,200 @@ export default function Users() {
       const isJson = ct.includes('application/json')
       const json = isJson ? await resp.json() : { error: await resp.text() }
       if (!resp.ok) { setMsg(json.error || 'Hata'); return }
+      setBulkResult(json.items || [])
       setMsg(`Toplu işlem tamamlandı (${json.items.length})`)
+      const created = (json.items || []).filter((i: any) => i.id && !i.error).map((i: any) => ({
+        id: i.id,
+        full_name: i.full_name,
+        email: i.email,
+        role: i.role,
+        manager_id: null,
+      })) as UserRow[]
+      if (created.length) {
+        setUsers(prev => [...prev, ...created].sort((a,b)=>a.full_name.localeCompare(b.full_name)))
+      }
     } catch (e: any) {
       setMsg(`İstek başarısız: ${e?.message || 'network error'}`)
       return
     }
-    setBulkItems([])
   }
 
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold">Kullanıcı Ekle (Manuel)</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <input value={fullName} onChange={e=>setFullName(e.target.value)} placeholder="Ad Soyad" className="border rounded px-3 py-2" />
-          <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" className="border rounded px-3 py-2" />
-          <select value={role} onChange={e=>setRole(e.target.value as Role)} className="border rounded px-3 py-2">
-            <option value="seller">Satıcı</option>
-            <option value="accountant">Muhasebe</option>
-            <option value="manager">Yönetici</option>
-            <option value="admin">Admin</option>
-          </select>
-          <input value={password} readOnly className="border rounded px-3 py-2" />
+        <h2 className="text-xl font-semibold">{t('users_list_title')}</h2>
+        <div className="rounded-md border border-neutral-200 dark:border-neutral-800 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-neutral-50 dark:bg-neutral-800">
+              <tr>
+                <th className="text-left p-2">{t('full_name')}</th>
+                <th className="text-left p-2">{t('email')}</th>
+                <th className="text-left p-2">{t('role')}</th>
+                <th className="text-left p-2">{t('manager')}</th>
+                <th className="text-left p-2">{t('action')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.length === 0 ? (
+                <tr><td className="p-2" colSpan={5}>{t('empty_list')}</td></tr>
+              ) : users.map(u => (
+                <tr key={u.id} className="border-t border-neutral-200 dark:border-neutral-800">
+                  <td className="p-2">{u.full_name}</td>
+                  <td className="p-2">{u.email}</td>
+                  <td className="p-2">{u.role}</td>
+                  <td className="p-2">
+                    {u.role === 'seller' ? (u.manager_id ? managerNameMap[u.manager_id] || '—' : '—') : '—'}
+                  </td>
+                  <td className="p-2">
+                    {(u.role === 'manager' || u.role === 'admin') && (
+                      <button
+                        onClick={() => { setTargetManager(u.id); setAssignOpen(true); setSelectedSellerIds([]); setAssignError(null) }}
+                        className="rounded px-3 py-1 border"
+                      >{t('assign_sellers')}</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        <button onClick={submitSingle} className="rounded px-4 py-2 bg-neutral-900 text-white">Kaydet</button>
+        {assignError && <div className="text-sm text-red-600 mt-2">{assignError}</div>}
+      </section>
+      {assignOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-neutral-900 rounded-md w-[720px] max-w-full p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-lg font-semibold">{t('assign_modal_title')}</div>
+              <button onClick={()=>{ setAssignOpen(false) }} className="rounded px-2 py-1 border">{t('close')}</button>
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <label className="text-sm">{t('manager')}</label>
+                <select value={targetManager} onChange={e=>setTargetManager(e.target.value)} className="border rounded px-2 py-1">
+                  <option value="">{t('select')}</option>
+                  {managers.map(m => (<option key={m.id} value={m.id}>{m.full_name}</option>))}
+                </select>
+                <button onClick={()=>setSelectedSellerIds(sellers.map(s=>s.id))} className="rounded px-2 py-1 border">{t('select_all')}</button>
+                <button onClick={()=>setSelectedSellerIds([])} className="rounded px-2 py-1 border">{t('clear')}</button>
+              </div>
+              <div className="rounded-md border border-neutral-200 dark:border-neutral-800 overflow-x-auto max-h-80 overflow-y-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-neutral-50 dark:bg-neutral-800 sticky top-0">
+                    <tr>
+                      <th className="text-left p-2">{t('select')}</th>
+                      <th className="text-left p-2">{t('full_name')}</th>
+                      <th className="text-left p-2">{t('email')}</th>
+                      <th className="text-left p-2">{t('current_manager')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sellers.map(s => {
+                      const checked = selectedSellerIds.includes(s.id)
+                      return (
+                        <tr key={s.id} className="border-t border-neutral-200 dark:border-neutral-800">
+                          <td className="p-2">
+                            <input type="checkbox" checked={checked} onChange={(e)=>{
+                              const on = e.target.checked
+                              setSelectedSellerIds(prev => on ? [...prev, s.id] : prev.filter(id => id !== s.id))
+                            }} />
+                          </td>
+                          <td className="p-2">{s.full_name}</td>
+                          <td className="p-2">{s.email}</td>
+                          <td className="p-2">{s.manager_id ? managerNameMap[s.manager_id] || '—' : '—'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-end gap-3">
+                <button onClick={()=>setAssignOpen(false)} className="rounded px-3 py-2 border">{t('cancel')}</button>
+                <button disabled={!targetManager || selectedSellerIds.length===0 || assignBusy} onClick={async ()=>{
+                  setAssignError(null)
+                  setAssignBusy(true)
+                  try {
+                    const { error } = await supabase
+                      .from('users')
+                      .update({ manager_id: targetManager })
+                      .in('id', selectedSellerIds)
+                    if (error) { setAssignError(error.message || 'Atama hatası'); setAssignBusy(false); return }
+                    setUsers(prev => prev.map(u => selectedSellerIds.includes(u.id) ? { ...u, manager_id: targetManager } : u))
+                    setAssignBusy(false)
+                    setAssignOpen(false)
+                  } catch (err: any) {
+                    setAssignError(err?.message || 'Ağ hatası')
+                    setAssignBusy(false)
+                  }
+                }} className="rounded px-3 py-2 bg-neutral-900 text-white disabled:opacity-50">{t('save')}</button>
+              </div>
+              {assignError && <div className="text-sm text-red-600">{assignError}</div>}
+            </div>
+          </div>
+        </div>
+      )}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold">{t('users_manual_title')}</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <input value={fullName} onChange={e=>setFullName(e.target.value)} placeholder={t('full_name')} className="border rounded px-3 py-2" />
+          <input value={email} onChange={e=>setEmail(e.target.value)} placeholder={t('email')} className="border rounded px-3 py-2" />
+          <select value={role} onChange={e=>setRole(e.target.value as Role)} className="border rounded px-3 py-2">
+            <option value="seller">{t('role_seller')}</option>
+            <option value="manager">{t('role_manager')}</option>
+            <option value="accountant">{t('role_accountant')}</option>
+            <option value="admin">{t('role_admin')}</option>
+          </select>
+          <input value={password} readOnly className="border rounded px-3 py-2" placeholder={t('temp_password')} />
+        </div>
+        <button onClick={submitSingle} className="rounded px-4 py-2 bg-neutral-900 text-white">{t('save')}</button>
         {msg && <div className="text-sm text-blue-600">{msg}</div>}
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold">Toplu Yükleme (Excel)</h2>
+        <h2 className="text-xl font-semibold">{t('users_bulk_title')}</h2>
         <div className="flex items-center gap-3">
-          <button onClick={downloadTemplate} className="rounded px-3 py-2 border">Şablon indir</button>
+          <button onClick={downloadTemplate} className="rounded px-3 py-2 border">{t('template_download')}</button>
           <input type="file" accept=".xlsx,.xls,.csv" onChange={onFile} />
-          <button onClick={submitBulk} className="rounded px-4 py-2 bg-neutral-900 text-white">Yükle</button>
+          <button onClick={submitBulk} disabled={bulkItems.length === 0} className="rounded px-4 py-2 bg-neutral-900 text-white disabled:opacity-50">{t('bulk_create')}</button>
         </div>
-        <div className="text-sm text-neutral-600">Kolonlar: Ad Soyad, email, 6 haneli rastgele şifre (otomatik), rol (satıcı/muhasebe/yönetici)</div>
+        <div className="text-sm text-neutral-600">{t('columns_hint')}</div>
         {bulkItems.length > 0 && (
           <div className="rounded border p-3">
-            <div className="font-medium mb-2">Önizleme ({bulkItems.length})</div>
+            <div className="font-medium mb-2">{t('preview')} ({bulkItems.length})</div>
             <ul className="text-sm space-y-1">
               {bulkItems.map((i, idx) => (
                 <li key={idx}>{i.full_name} - {i.email} - {i.role}</li>
               ))}
             </ul>
+          </div>
+        )}
+        {bulkResult.length > 0 && (
+          <div className="rounded border p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-medium">{t('results')} ({bulkResult.length})</div>
+              <button onClick={downloadResults} className="rounded px-3 py-1 border">{t('download_results')}</button>
+            </div>
+            <table className="min-w-full text-sm">
+              <thead className="bg-neutral-50 dark:bg-neutral-800">
+                <tr>
+                  <th className="text-left p-2">{t('full_name')}</th>
+                  <th className="text-left p-2">{t('email')}</th>
+                  <th className="text-left p-2">{t('role')}</th>
+                  <th className="text-left p-2">{t('temp_password')}</th>
+                  <th className="text-left p-2">{t('assign_error')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bulkResult.map((r, i) => (
+                  <tr key={i} className="border-t border-neutral-200 dark:border-neutral-800">
+                    <td className="p-2">{r.full_name || '—'}</td>
+                    <td className="p-2">{r.email || '—'}</td>
+                    <td className="p-2">{r.role || '—'}</td>
+                    <td className="p-2">{r.password || '—'}</td>
+                    <td className="p-2 text-red-600">{r.error || ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>

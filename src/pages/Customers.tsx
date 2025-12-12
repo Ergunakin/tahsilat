@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useTenant } from '@/stores/tenant'
+import { useI18n } from '@/i18n'
 
 interface Customer {
   id: string
@@ -16,6 +17,7 @@ export default function Customers() {
   const { company } = useTenant()
   const [items, setItems] = useState<Customer[]>([])
   const [loading, setLoading] = useState(false)
+  const { t } = useI18n()
   useEffect(() => {
     const load = async () => {
       if (!company?.id) return
@@ -32,24 +34,24 @@ export default function Customers() {
   }, [company?.id])
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Customers</h1>
+      <h1 className="text-xl font-semibold">{t('customers_title')}</h1>
       <div className="rounded-md border border-neutral-200 dark:border-neutral-800 overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead className="bg-neutral-50 dark:bg-neutral-800">
             <tr>
-              <th className="text-left p-2">Name</th>
-              <th className="text-left p-2">Email</th>
-              <th className="text-left p-2">Phone</th>
-              <th className="text-left p-2">Total Debt</th>
-              <th className="text-left p-2">Overdue Debt</th>
-              <th className="text-left p-2">Created</th>
+              <th className="text-left p-2">{t('customers_name')}</th>
+              <th className="text-left p-2">{t('customers_email')}</th>
+              <th className="text-left p-2">{t('customers_phone')}</th>
+              <th className="text-left p-2">{t('customers_total_debt')}</th>
+              <th className="text-left p-2">{t('customers_overdue_debt')}</th>
+              <th className="text-left p-2">{t('customers_created')}</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td className="p-2" colSpan={6}>Loading...</td></tr>
+              <tr><td className="p-2" colSpan={6}>{t('loading')}</td></tr>
             ) : items.length === 0 ? (
-              <tr><td className="p-2" colSpan={6}>No customers</td></tr>
+              <tr><td className="p-2" colSpan={6}>{t('empty_list')}</td></tr>
             ) : items.map(c => (
               <tr key={c.id} className="border-t border-neutral-200 dark:border-neutral-800">
                 <td className="p-2">{c.name}</td>
@@ -66,4 +68,3 @@ export default function Customers() {
     </div>
   )
 }
-
