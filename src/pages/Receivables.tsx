@@ -215,6 +215,9 @@ export default function Receivables() {
   const [promiseDate, setPromiseDate] = useState('')
   const [promiseAmount, setPromiseAmount] = useState('')
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [timelineForId, setTimelineForId] = useState<string | null>(null)
+  const [timelineItems, setTimelineItems] = useState<{ text: string; created_at?: string }[]>([])
+  const [timelineBusy, setTimelineBusy] = useState(false)
   const [editCustomer, setEditCustomer] = useState('')
   const [editDueDate, setEditDueDate] = useState('')
   const [editAmount, setEditAmount] = useState('')
@@ -582,6 +585,7 @@ export default function Receivables() {
               {sortedDebts.length === 0 ? (
                 <tr><td className="p-2" colSpan={8}>—</td></tr>
               ) : sortedDebts.map(d => (
+                <>
                 <tr key={d.id} className={cn('border-t border-neutral-200 dark:border-neutral-800', (new Date(d.due_date).getTime() < Date.now()) ? 'text-red-600' : 'text-green-600')}>
                   {editingId === d.id ? (
                     <>
@@ -648,6 +652,29 @@ export default function Receivables() {
                             <button className="text-xs rounded px-2 py-1 border" title="Düzenle" onClick={()=>{ setEditingId(d.id); setEditCustomer(d.customer_name || ''); setEditDueDate(d.due_date || ''); setEditAmount(String(d.amount)); setEditCurrency(String(d.currency).toUpperCase() === 'TRY' ? 'TL' : String(d.currency).toUpperCase()); setEditType(getTypeFromDesc(d.description) || 'Senet'); setEditSellerId(d.seller_id || '') }}>⚙</button>
                             <button className="text-xs rounded px-2 py-1 border" title="Not" onClick={()=>{ setNoteForId(d.id); setNoteContent(''); setNoteContact(''); setNotePhone(''); setPromiseDate(''); setPromiseAmount(''); }}>✎</button>
                             <button className="text-xs rounded px-2 py-1 border" title="Tahsilat" onClick={()=>{ setCollectForId(d.id); setCollectAmount(String((d as any).remaining_amount || d.amount)); }}>💲</button>
+                            <button className="text-xs rounded px-2 py-1 border" title="Zaman Çizelgesi" onClick={async ()=>{
+                              if (!company?.id) return
+                              setTimelineForId(d.id)
+                              setTimelineBusy(true)
+                              try {
+                                const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+                                const apiBase = rawBase ? rawBase.replace(/\/+$/, '') : undefined
+                                let ok = false
+                                let items: any[] = []
+                                try {
+                                  const rLocal = await fetch('/api/debts/manage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'timeline', company_id: company.id, customer_id: d.customer_id }) })
+                                  const ctLocal = rLocal.headers.get('content-type') || ''
+                                  if (rLocal.ok && ctLocal.includes('application/json')) { const j = await rLocal.json(); items = j.items || []; ok = true }
+                                } catch {}
+                                if (!ok && import.meta.env.DEV && apiBase && apiBase.length > 0) {
+                                  const rRemote = await fetch(`${apiBase}/api/debts/manage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'timeline', company_id: company.id, customer_id: d.customer_id }) })
+                                  const ctRemote = rRemote.headers.get('content-type') || ''
+                                  if (rRemote.ok && ctRemote.includes('application/json')) { const j = await rRemote.json(); items = j.items || []; ok = true }
+                                }
+                                setTimelineItems(items)
+                              } catch {}
+                              setTimelineBusy(false)
+                            }}>🕑</button>
                           </div>
                         )}
                       </td>
@@ -707,6 +734,22 @@ export default function Receivables() {
                     </>
                   )}
                 </tr>
+                {timelineForId === d.id && (
+                  <tr className="border-b">
+                    <td className="p-2 text-xs text-neutral-700 dark:text-neutral-300" colSpan={10}>
+                      {timelineBusy ? 'Yükleniyor…' : (
+                        timelineItems.length === 0 ? '—' : (
+                          <ul className="space-y-1">
+                            {timelineItems.map((it, idx) => (
+                              <li key={idx}>{it.text}</li>
+                            ))}
+                          </ul>
+                        )
+                      )}
+                    </td>
+                  </tr>
+                )}
+                </>
               ))}
             </tbody>
           </table>
@@ -900,8 +943,8 @@ export default function Receivables() {
                     <td className="p-2">{r.description ? String(r.description).replace('type=','') : '—'}</td>
                     <td className="p-2 text-blue-600">{r.message || ''}</td>
                     <td className="p-2 text-red-600">{r.error || ''}</td>
-                  </tr>
-                ))}
+                </tr>
+              ))}
               </tbody>
             </table>
           </div>
