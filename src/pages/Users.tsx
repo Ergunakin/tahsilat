@@ -586,7 +586,7 @@ function HierarchyView({ users, companyId, apiBase, onRefresh }: { users: UserRo
             <div className="text-xs text-neutral-500 mt-2">Satıcıyı bir yönetici üzerine sürükleyerek atayın</div>
           </div>
         ) : roots.map(r => (
-          <TreeNode key={r.id} node={r} childrenFn={childrenOf} isDescendant={isDescendant} onAssign={onDropAssign} visited={new Set([r.id])} depth={0} />
+          <TreeNode key={r.id} node={r} childrenFn={childrenOf} isDescendant={isDescendant} onAssign={onDropAssign} onRefresh={onRefresh} visited={new Set([r.id])} depth={0} />
         ))}
       </div>
       {roots.length > 0 && unassignedSellers.length > 0 && (
@@ -614,9 +614,17 @@ function HierarchyView({ users, companyId, apiBase, onRefresh }: { users: UserRo
   )
 }
 
-function TreeNode({ node, childrenFn, isDescendant, onAssign, visited, depth = 0 }: { node: UserRow; childrenFn: (id: string)=>UserRow[]; isDescendant: (a:string,b:string)=>boolean; onAssign: (dragId:string,targetId:string)=>void; visited: Set<string>; depth?: number }) {
+function TreeNode({ node, childrenFn, isDescendant, onAssign, onRefresh, visited, depth = 0 }: { node: UserRow; childrenFn: (id: string)=>UserRow[]; isDescendant: (a:string,b:string)=>boolean; onAssign: (dragId:string,targetId:string)=>void; onRefresh: ()=>void; visited: Set<string>; depth?: number }) {
   if (depth > 50) return null
   const kids = (childrenFn(node.id) || []).filter(k => !visited.has(k.id))
+  const { company } = useTenant()
+  const rawApiBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+  const apiBase = rawApiBase ? rawApiBase.replace(/\/+$/, '') : undefined
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [name, setName] = useState(node.full_name)
+  const [email, setEmail] = useState(node.email)
+  const [err, setErr] = useState<string | null>(null)
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
     e.dataTransfer.setData('text/plain', JSON.stringify({ id: node.id, role: node.role }))
   }
@@ -642,18 +650,81 @@ function TreeNode({ node, childrenFn, isDescendant, onAssign, visited, depth = 0
     <div className="pl-2">
       <div
         className="flex items-center gap-2 rounded px-2 py-1 border hover:bg-neutral-50 dark:hover:bg-neutral-800"
-        draggable
+        draggable={!editing}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
-        <span className="text-sm font-medium">{node.full_name}</span>
-        <span className="text-xs text-neutral-600">{node.role}</span>
+        {editing ? (
+          <>
+            <input value={name} onChange={e=>setName(e.target.value)} className="border rounded px-2 py-1 text-sm" />
+            <input value={email} onChange={e=>setEmail(e.target.value)} className="border rounded px-2 py-1 text-sm" />
+            <button
+              className="text-xs px-2 py-1 rounded border"
+              disabled={saving || !company?.id}
+              onClick={async ()=>{
+                if (!company?.id) return
+                setErr(null); setSaving(true)
+                try {
+                  let url = '/api/users/update'
+                  if (import.meta.env.DEV && apiBase && apiBase.length > 0) url = `${apiBase}/api/users/update`
+                  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: node.id, company_id: company.id, full_name: name, email }) })
+                  const ct = resp.headers.get('content-type') || ''
+                  const isJson = ct.includes('application/json')
+                  const json = isJson ? await resp.json() : { error: await resp.text() }
+                  if (!resp.ok) { setErr(json.error || 'Hata'); setSaving(false); return }
+                  setEditing(false)
+                } catch (e: any) {
+                  setErr(e?.message || 'Ağ hatası')
+                }
+                setSaving(false)
+              }}
+            >Kaydet</button>
+            <button className="text-xs px-2 py-1 rounded border" onClick={()=>{ setEditing(false); setName(node.full_name); setEmail(node.email) }}>İptal</button>
+          </>
+        ) : (
+          <>
+            <span className="text-sm font-medium">{node.full_name}</span>
+            <span className="text-xs text-neutral-600">{node.email}</span>
+            <span className="text-xs text-neutral-600">{node.role}</span>
+            <button className="ml-auto text-xs px-2 py-1 rounded border" title="Düzenle" onClick={(e)=>{ e.stopPropagation(); setEditing(true) }}>✎</button>
+            <button className="text-xs px-2 py-1 rounded border" title="Sil"
+              onMouseDown={(e)=>{ e.stopPropagation(); }}
+              onClick={async (e)=>{
+              e.stopPropagation()
+              e.preventDefault()
+              if (!company?.id) return
+              if (!confirm('Silmek istediğinizden emin misiniz?')) return
+              try {
+                // Prefer local API (updated logic), then fallback to remote base if configured
+                let ok = false
+                try {
+                  const respLocal = await fetch('/api/users/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: node.id, company_id: company.id }) })
+                  const ctLocal = respLocal.headers.get('content-type') || ''
+                  if (respLocal.ok && ctLocal.includes('application/json')) { ok = true }
+                } catch {}
+                if (!ok && import.meta.env.DEV && apiBase && apiBase.length > 0) {
+                  const respRemote = await fetch(`${apiBase}/api/users/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: node.id, company_id: company.id }) })
+                  const ctRemote = respRemote.headers.get('content-type') || ''
+                  if (!(respRemote.ok && ctRemote.includes('application/json'))) {
+                    const msg = ctRemote.includes('application/json') ? (await respRemote.json()).error : await respRemote.text()
+                    alert(msg || 'Silme başarısız')
+                    return
+                  }
+                }
+                await onRefresh()
+              } catch (e: any) {
+                alert(e?.message || 'Ağ hatası')
+              }
+            }}>🗑</button>
+          </>
+        )}
       </div>
+      {err && <div className="text-xs text-red-600 mt-1">{err}</div>}
       {kids.length > 0 && (
         <div className="pl-4 mt-1 space-y-1">
           {kids.map(k => (
-            <TreeNode key={k.id} node={k} childrenFn={childrenFn} isDescendant={isDescendant} onAssign={onAssign} visited={new Set([...visited, k.id])} depth={depth + 1} />
+            <TreeNode key={k.id} node={k} childrenFn={childrenFn} isDescendant={isDescendant} onAssign={onAssign} onRefresh={onRefresh} visited={new Set([...visited, k.id])} depth={depth + 1} />
           ))}
         </div>
       )}

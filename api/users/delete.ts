@@ -11,6 +11,22 @@ export default async function handler(req: any, res: any) {
   const { id, company_id } = req.body || {}
   if (!id || !company_id) return res.status(400).json({ error: 'Missing id/company_id' })
   try {
+    // Before deleting, unassign direct descendants (sellers/managers) from this manager, verify loop until clear
+    for (let i = 0; i < 3; i++) {
+      const { data: children, error: selErr } = await admin
+        .from('users')
+        .select('id')
+        .eq('manager_id', id)
+      if (selErr) return res.status(500).json({ error: selErr.message })
+      const childIds = (children || []).map((r: any) => r.id)
+      if (!childIds.length) break
+      const { error: unassignErr } = await admin
+        .from('users')
+        .update({ manager_id: null })
+        .in('id', childIds)
+      if (unassignErr) return res.status(500).json({ error: unassignErr.message })
+    }
+
     const { error: delAuthErr } = await admin.auth.admin.deleteUser(id)
     if (delAuthErr && !String(delAuthErr.message || '').toLowerCase().includes('not found')) {
       return res.status(500).json({ error: delAuthErr.message })
