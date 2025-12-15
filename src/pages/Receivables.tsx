@@ -14,6 +14,7 @@ interface DebtRow { id: string; customer_id: string; customer_name?: string; amo
 export default function Receivables() {
   const { t, lang } = useI18n()
   const { company } = useTenant()
+  const [currentRole, setCurrentRole] = useState<string>('')
   const [customerName, setCustomerName] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [amount, setAmount] = useState('')
@@ -33,6 +34,21 @@ export default function Receivables() {
   const [bulkResult, setBulkResult] = useState<any[]>([])
 
   useEffect(() => {
+    const loadCurrentRole = async () => {
+      try {
+        const { data: u } = await supabase.auth.getUser()
+        const uid = u?.user?.id
+        if (uid && company?.id) {
+          const { data: row } = await supabase
+            .from('users')
+            .select('role')
+            .eq('company_id', company.id)
+            .eq('id', uid)
+            .maybeSingle()
+          if (row?.role) setCurrentRole(row.role as string)
+        }
+      } catch {}
+    }
     const loadSellers = async () => {
       if (!company?.id) return
       const { data } = await supabase
@@ -43,6 +59,7 @@ export default function Receivables() {
         .order('full_name', { ascending: true })
       setSellers((data as any[] || []).map(u => ({ id: u.id, full_name: u.full_name })))
     }
+    loadCurrentRole()
     loadSellers()
   }, [company?.id])
 
@@ -178,6 +195,13 @@ export default function Receivables() {
     })
   }, [debts, filterCustomer, filterSeller, filterType])
 
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editCustomer, setEditCustomer] = useState('')
+  const [editDueDate, setEditDueDate] = useState('')
+  const [editAmount, setEditAmount] = useState('')
+  const [editCurrency, setEditCurrency] = useState('TL')
+  const [editType, setEditType] = useState('Senet')
+  const [editSellerId, setEditSellerId] = useState('')
   const sortedDebts = useMemo(() => {
     if (!sortConfig.key || !sortConfig.dir || !sortConfig.type) return filteredDebts
     const key = sortConfig.key
@@ -438,6 +462,8 @@ export default function Receivables() {
                   <button className="text-xs" onClick={()=>setSortConfig({ key: 'created_at', type: 'numeric', dir: 'desc' })}>↓</button>
                 </span>
               </th>
+              <th className="text-left p-2"></th>
+              <th className="text-left p-2"></th>
             </tr>
             <tr>
               <th className="text-left p-2"><input value={filterCustomer} onChange={e=>setFilterCustomer(e.target.value)} placeholder={t('customer')} className="border rounded px-2 py-1 w-full" /></th>
@@ -455,14 +481,114 @@ export default function Receivables() {
                 <tr><td className="p-2" colSpan={8}>—</td></tr>
               ) : sortedDebts.map(d => (
                 <tr key={d.id} className={cn('border-t border-neutral-200 dark:border-neutral-800', (new Date(d.due_date).getTime() < Date.now()) ? 'text-red-600' : 'text-green-600')}>
-                  <td className="p-2">{d.customer_name || d.customer_id}</td>
-                  <td className="p-2">{formatDateDisplay(d.due_date, lang)}</td>
-                  <td className="p-2">{d.amount.toFixed(2)}</td>
-                  <td className="p-2">{d.currency}</td>
-                  <td className="p-2">{d.seller_name || '—'}</td>
-                  <td className="p-2">{(() => { const ty = getTypeFromDesc(d.description); return ty ? translateType(ty) : '—' })()}</td>
-                  <td className="p-2">{d.status}</td>
-                  <td className="p-2">{d.created_at ? formatDateDisplay(d.created_at, lang) : '—'}</td>
+                  {editingId === d.id ? (
+                    <>
+                      <td className="p-2"><input value={editCustomer} onChange={e=>setEditCustomer(e.target.value)} className="border rounded px-2 py-1 w-full" /></td>
+                      <td className="p-2"><input type="date" value={editDueDate} onChange={e=>setEditDueDate(e.target.value)} className="border rounded px-2 py-1 w-full" /></td>
+                      <td className="p-2"><input value={editAmount} onChange={e=>setEditAmount(e.target.value)} className="border rounded px-2 py-1 w-full" /></td>
+                      <td className="p-2"><select value={editCurrency} onChange={e=>setEditCurrency(e.target.value)} className="border rounded px-2 py-1 w-full">{currencies.map(c=>(<option key={c} value={c}>{c}</option>))}</select></td>
+                      <td className="p-2"><select value={editType} onChange={e=>setEditType(e.target.value)} className="border rounded px-2 py-1 w-full">{typesForSelect.map(dt => (<option key={dt} value={dt}>{translateType(dt)}</option>))}</select></td>
+                      <td className="p-2"><select value={editSellerId} onChange={e=>setEditSellerId(e.target.value)} className="border rounded px-2 py-1 w-full"><option value="">—</option>{sellers.map(s => (<option key={s.id} value={s.id}>{s.full_name}</option>))}</select></td>
+                      <td className="p-2"><button className="text-xs rounded px-2 py-1 border" onClick={async ()=>{
+                        if (!company?.id) return
+                        let url = '/api/receivables/update'
+                        const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+                        const apiBase = rawBase ? rawBase.replace(/\/+$/, '') : undefined
+                        if (import.meta.env.DEV && apiBase && apiBase.length > 0) url = `${apiBase}/api/receivables/update`
+                        const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ company_id: company.id, id: d.id, customer_name: editCustomer, due_date: editDueDate, amount: Number(editAmount), currency: editCurrency, receivable_type: editType, seller_id: editSellerId }) })
+                        const ct = resp.headers.get('content-type') || ''
+                        const isJson = ct.includes('application/json')
+                        const json = isJson ? await resp.json() : { error: await resp.text() }
+                        if (!resp.ok) { alert(json.error || 'Güncelleme hatası'); return }
+                        setEditingId(null)
+                        const { data } = await supabase
+                          .from('debts')
+                          .select('id,customer_id,amount,currency,due_date,seller_id,status,description,created_at')
+                          .eq('company_id', company.id)
+                          .order('due_date', { ascending: true })
+                        const rows = (data as any[] || []) as DebtRow[]
+                        const custIds = Array.from(new Set(rows.map(r => r.customer_id).filter(Boolean))) as string[]
+                        const sellerIds = Array.from(new Set(rows.map(r => r.seller_id).filter(Boolean))) as string[]
+                        let custMap: Record<string,string> = {}
+                        let sellerMap: Record<string,string> = {}
+                        if (custIds.length) {
+                          const { data: custs } = await supabase
+                            .from('customers')
+                            .select('id,name')
+                            .in('id', custIds)
+                          custMap = Object.fromEntries((custs || []).map(c => [c.id, c.name]))
+                        }
+                        if (sellerIds.length) {
+                          const { data: us } = await supabase
+                            .from('users')
+                            .select('id,full_name')
+                            .in('id', sellerIds)
+                          sellerMap = Object.fromEntries((us || []).map(u => [u.id, u.full_name]))
+                        }
+                        setDebts(rows.map(r => ({ ...r, customer_name: custMap[r.customer_id], seller_name: r.seller_id ? sellerMap[r.seller_id] : undefined })))
+                      }}>Kaydet</button>
+                      <button className="text-xs rounded px-2 py-1 border ml-2" onClick={()=>setEditingId(null)}>İptal</button></td>
+                      <td className="p-2"></td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="p-2">{d.customer_name || d.customer_id}</td>
+                      <td className="p-2">{formatDateDisplay(d.due_date, lang)}</td>
+                      <td className="p-2">{d.amount.toFixed(2)}</td>
+                      <td className="p-2">{d.currency}</td>
+                      <td className="p-2">{(() => { const ty = getTypeFromDesc(d.description); return ty ? translateType(ty) : '—' })()}</td>
+                      <td className="p-2">{d.seller_name || '—'}</td>
+                      <td className="p-2">{d.status}</td>
+                      <td className="p-2">{d.created_at ? formatDateDisplay(d.created_at, lang) : '—'}</td>
+                      <td className="p-2">
+                        {(currentRole === 'admin' || currentRole === 'accountant') && (
+                          <button className="text-xs rounded px-2 py-1 border" onClick={()=>{ setEditingId(d.id); setEditCustomer(d.customer_name || ''); setEditDueDate(d.due_date || ''); setEditAmount(String(d.amount)); setEditCurrency(String(d.currency).toUpperCase() === 'TRY' ? 'TL' : String(d.currency).toUpperCase()); setEditType(getTypeFromDesc(d.description) || 'Senet'); setEditSellerId(d.seller_id || '') }}>✎</button>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        {(currentRole === 'admin' || currentRole === 'accountant') && (
+                          <button className="text-xs rounded px-2 py-1 border" onClick={async ()=>{
+                            if (!company?.id) return
+                            if (!confirm('Silmek istediğinizden emin misiniz?')) return
+                            let url = '/api/receivables/delete'
+                            const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+                            const apiBase = rawBase ? rawBase.replace(/\/+$/, '') : undefined
+                            if (import.meta.env.DEV && apiBase && apiBase.length > 0) url = `${apiBase}/api/receivables/delete`
+                            const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ company_id: company.id, id: d.id }) })
+                            const ct = resp.headers.get('content-type') || ''
+                            const isJson = ct.includes('application/json')
+                            const json = isJson ? await resp.json() : { error: await resp.text() }
+                            if (!resp.ok) { alert(json.error || 'Silme hatası'); return }
+                            const { data } = await supabase
+                              .from('debts')
+                              .select('id,customer_id,amount,currency,due_date,seller_id,status,description,created_at')
+                              .eq('company_id', company.id)
+                              .order('due_date', { ascending: true })
+                            const rows = (data as any[] || []) as DebtRow[]
+                            const custIds = Array.from(new Set(rows.map(r => r.customer_id).filter(Boolean))) as string[]
+                            const sellerIds = Array.from(new Set(rows.map(r => r.seller_id).filter(Boolean))) as string[]
+                            let custMap: Record<string,string> = {}
+                            let sellerMap: Record<string,string> = {}
+                            if (custIds.length) {
+                              const { data: custs } = await supabase
+                                .from('customers')
+                                .select('id,name')
+                                .in('id', custIds)
+                              custMap = Object.fromEntries((custs || []).map(c => [c.id, c.name]))
+                            }
+                            if (sellerIds.length) {
+                              const { data: us } = await supabase
+                                .from('users')
+                                .select('id,full_name')
+                                .in('id', sellerIds)
+                              sellerMap = Object.fromEntries((us || []).map(u => [u.id, u.full_name]))
+                            }
+                            setDebts(rows.map(r => ({ ...r, customer_name: custMap[r.customer_id], seller_name: r.seller_id ? sellerMap[r.seller_id] : undefined })))
+                          }}>🗑</button>
+                        )}
+                      </td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
