@@ -24,6 +24,10 @@ export default function Receivables() {
   const [msg, setMsg] = useState<string | null>(null)
   const [sellers, setSellers] = useState<SellerOpt[]>([])
   const [debts, setDebts] = useState<DebtRow[]>([])
+  const [sortConfig, setSortConfig] = useState<{ key?: string; type?: 'alpha'|'numeric'; dir?: 'asc'|'desc' }>({ key: undefined, type: undefined, dir: undefined })
+  const [filterCustomer, setFilterCustomer] = useState('')
+  const [filterSeller, setFilterSeller] = useState('')
+  const [filterType, setFilterType] = useState('')
   const [bulkItems, setBulkItems] = useState<any[]>([])
   const [bulkMsg, setBulkMsg] = useState<string | null>(null)
   const [bulkResult, setBulkResult] = useState<any[]>([])
@@ -108,27 +112,130 @@ export default function Receivables() {
   }
   const typesForSelect = useMemo(() => Array.from(new Set(debtTypes.map(s => s.trim()))), [debtTypes])
 
+  const getTypeFromDesc = (desc?: string) => {
+    const ty = (desc || '').replace('type=', '')
+    return ty
+  }
+
+  const excelSerialToISODate = (n: number) => {
+    const ms = Math.round((n - 25569) * 86400 * 1000)
+    const d = new Date(ms)
+    const y = d.getUTCFullYear()
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+    const day = String(d.getUTCDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+  const normalizeDate = (v: any) => {
+    if (v == null) return null as any
+    if (typeof v === 'number' && isFinite(v)) return excelSerialToISODate(v)
+    if (v instanceof Date) {
+      const y = v.getUTCFullYear()
+      const m = String(v.getUTCMonth() + 1).padStart(2, '0')
+      const day = String(v.getUTCDate()).padStart(2, '0')
+      return `${y}-${m}-${day}`
+    }
+    const s = String(v).trim()
+    if (!s) return null as any
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+    if(/^\d+$/.test(s)) return excelSerialToISODate(Number(s))
+    if (/^\d{1,2}[\/.]\d{1,2}[\/.]\d{4}$/.test(s)) {
+      const sep = s.includes('.') ? '.' : '/'
+      const parts = s.split(sep)
+      const d = parts[0]
+      const m = parts[1]
+      const y = parts[2]
+      const mm = String(Number(m)).padStart(2, '0')
+      const dd = String(Number(d)).padStart(2, '0')
+      return `${y}-${mm}-${dd}`
+    }
+    if (/^\d{4}[\/.]\d{1,2}[\/.]\d{1,2}$/.test(s)) {
+      const sep = s.includes('.') ? '.' : '/'
+      const parts = s.split(sep)
+      const y = parts[0]
+      const m = parts[1]
+      const d = parts[2]
+      const mm = String(Number(m)).padStart(2, '0')
+      const dd = String(Number(d)).padStart(2, '0')
+      return `${y}-${mm}-${dd}`
+    }
+    return null as any
+  }
+
+  const filteredDebts = useMemo(() => {
+    const fc = filterCustomer.trim().toLowerCase()
+    const fs = filterSeller.trim().toLowerCase()
+    const ft = filterType.trim().toLowerCase()
+    if (!fc && !fs && !ft) return debts
+    return debts.filter(d => {
+      const cust = (d.customer_name || d.customer_id || '').toString().toLowerCase()
+      const sell = (d.seller_name || '').toString().toLowerCase()
+      const tyRaw = getTypeFromDesc(d.description) || ''
+      const tyDisp = translateType(tyRaw).toString().toLowerCase()
+      const okC = fc ? cust.includes(fc) : true
+      const okS = fs ? sell.includes(fs) : true
+      const okT = ft ? (tyRaw.toLowerCase().includes(ft) || tyDisp.includes(ft)) : true
+      return okC && okS && okT
+    })
+  }, [debts, filterCustomer, filterSeller, filterType])
+
+  const sortedDebts = useMemo(() => {
+    if (!sortConfig.key || !sortConfig.dir || !sortConfig.type) return filteredDebts
+    const key = sortConfig.key
+    const type = sortConfig.type
+    const dir = sortConfig.dir
+    const val = (d: DebtRow): any => {
+      if (key === 'customer') return d.customer_name || d.customer_id || ''
+      if (key === 'due_date') return d.due_date ? new Date(d.due_date).getTime() : 0
+      if (key === 'amount') return typeof d.amount === 'number' ? d.amount : Number(d.amount) || 0
+      if (key === 'currency') return d.currency || ''
+      if (key === 'seller') return d.seller_name || ''
+      if (key === 'type') return getTypeFromDesc(d.description)
+      if (key === 'status') return d.status || ''
+      if (key === 'created_at') return d.created_at ? new Date(d.created_at).getTime() : 0
+      return ''
+    }
+    const arr = [...filteredDebts]
+    arr.sort((a, b) => {
+      const av = val(a)
+      const bv = val(b)
+      let cmp = 0
+      if (type === 'alpha') {
+        cmp = String(av).localeCompare(String(bv), undefined, { sensitivity: 'base' })
+      } else {
+        const na = Number(av) || 0
+        const nb = Number(bv) || 0
+        cmp = na - nb
+      }
+      return dir === 'asc' ? cmp : -cmp
+    })
+    return arr
+  }, [filteredDebts, sortConfig])
+
   const downloadTemplate = () => {
+    const dueColLabel = lang === 'tr' ? `${t('due_date')} (GG.AA.YYYY)` : t('due_date')
+    const txnColLabel = lang === 'tr' ? `${t('transaction_date')} (GG.AA.YYYY)` : t('transaction_date')
     const typeOptions = (typesForSelect && typesForSelect.length)
       ? typesForSelect.map(translateType).join(' | ')
       : [translateType('Senet'), translateType('Çek'), translateType('Havale')].join(' | ')
     const currencyOptions = (currencies && currencies.length)
       ? currencies.join(' | ')
       : 'TL | USD | EUR'
+    const dateSample = lang === 'tr' ? '01.01.2025' : '2025-01-01'
     const ws = XLSX.utils.json_to_sheet([
       {
         [t('customer')]: t('customer'),
-        [t('due_date')]: '2025-01-01',
+        [dueColLabel]: dateSample,
         [t('amount')]: '1000.00',
         [t('currency')]: currencyOptions,
         [t('debt_type')]: typeOptions,
         [t('seller')]: 'Satış Temsilcisi Adı',
-        [t('transaction_date')]: '2025-01-01'
+        [txnColLabel]: dateSample
       }
     ])
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'ReceivablesTemplate')
-    XLSX.writeFile(wb, 'alacak_sablon.xlsx')
+    const filename = lang === 'tr' ? 'Alacak Şablon.xls' : 'Receivables Template.xls'
+    XLSX.writeFile(wb, filename)
   }
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -138,14 +245,16 @@ export default function Receivables() {
     const wb = XLSX.read(buf)
     const ws = wb.Sheets[wb.SheetNames[0]]
     const rows = XLSX.utils.sheet_to_json(ws)
+    const dueColLabel = lang === 'tr' ? `${t('due_date')} (GG.AA.YYYY)` : t('due_date')
+    const txnColLabel = lang === 'tr' ? `${t('transaction_date')} (GG.AA.YYYY)` : t('transaction_date')
     const mapped = rows.map((r: any) => ({
       customer_name: r[t('customer')] || r['Müşteri'] || r['Customer'] || r['customer'],
-      due_date: r[t('due_date')] || r['Vade Tarihi'] || r['Due Date'] || r['due_date'],
+      due_date: normalizeDate(r[dueColLabel] || r[t('due_date')] || r['Vade Tarihi'] || r['Due Date'] || r['due_date']),
       amount: r[t('amount')] || r['Alacak Tutarı'] || r['Receivable Amount'] || r['amount'],
       currency: r[t('currency')] || r['Para Birimi'] || r['Currency'] || r['currency'],
       receivable_type: r[t('debt_type')] || r['Alacak Tipi'] || r['Receivable Type'] || r['type'],
       seller: r[t('seller')] || r['Satış Temsilcisi'] || r['Sales Rep'] || r['seller'],
-      txn_date: r[t('transaction_date')] || r['İşlem Tarihi (opsiyonel)'] || r['Transaction Date (optional)'] || r['transaction_date']
+      txn_date: normalizeDate(r[txnColLabel] || r[t('transaction_date')] || r['İşlem Tarihi (opsiyonel)'] || r['Transaction Date (optional)'] || r['transaction_date'])
     }))
     setBulkItems(mapped)
   }
@@ -153,7 +262,8 @@ export default function Receivables() {
   const submitBulk = async () => {
     setBulkMsg(null)
     if (!company?.id) { setBulkMsg('Şirket yok'); return }
-    const apiBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+    const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+    const apiBase = rawBase ? rawBase.replace(/\/+$/, '') : undefined
     let url = '/api/receivables/bulk'
     if (import.meta.env.DEV) {
       if (apiBase && apiBase.length > 0) {
@@ -163,15 +273,25 @@ export default function Receivables() {
         return
       }
     }
-    const resp = await fetch(url, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ company_id: company.id, items: bulkItems })
-    })
-    const ct = resp.headers.get('content-type') || ''
-    const isJson = ct.includes('application/json')
-    const json = isJson ? await resp.json() : { error: await resp.text() }
-    if (!resp.ok) { setBulkMsg(json.error || 'Hata'); return }
-    setBulkResult(json.items || [])
+    try {
+      const itemsNormalized = bulkItems.map(i => ({
+        ...i,
+        due_date: normalizeDate(i.due_date),
+        txn_date: normalizeDate(i.txn_date)
+      }))
+      const resp = await fetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: company.id, items: itemsNormalized })
+      })
+      const ct = resp.headers.get('content-type') || ''
+      const isJson = ct.includes('application/json')
+      const json = isJson ? await resp.json() : { error: await resp.text() }
+      if (!resp.ok) { setBulkMsg(json.error || 'Hata'); return }
+      setBulkResult(json.items || [])
+    } catch (e: any) {
+      setBulkMsg(`Ağ hatası: ${e?.message || 'fetch failed'}`)
+      return
+    }
     // refresh debts
     const { data } = await supabase
       .from('debts')
@@ -179,7 +299,25 @@ export default function Receivables() {
       .eq('company_id', company.id)
       .order('due_date', { ascending: true })
     const rows = (data as any[] || []) as DebtRow[]
-    setDebts(rows)
+    const custIds = Array.from(new Set(rows.map(r => r.customer_id).filter(Boolean))) as string[]
+    const sellerIds = Array.from(new Set(rows.map(r => r.seller_id).filter(Boolean))) as string[]
+    let custMap: Record<string,string> = {}
+    let sellerMap: Record<string,string> = {}
+    if (custIds.length) {
+      const { data: custs } = await supabase
+        .from('customers')
+        .select('id,name')
+        .in('id', custIds)
+      custMap = Object.fromEntries((custs || []).map(c => [c.id, c.name]))
+    }
+    if (sellerIds.length) {
+      const { data: us } = await supabase
+        .from('users')
+        .select('id,full_name')
+        .in('id', sellerIds)
+      sellerMap = Object.fromEntries((us || []).map(u => [u.id, u.full_name]))
+    }
+    setDebts(rows.map(r => ({ ...r, customer_name: custMap[r.customer_id], seller_name: r.seller_id ? sellerMap[r.seller_id] : undefined })))
   }
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -242,29 +380,87 @@ export default function Receivables() {
         <h2 className="text-lg font-semibold">{t('debts_list_title')}</h2>
         <div className="rounded-md border border-neutral-200 dark:border-neutral-800 overflow-x-auto">
           <table className="min-w-full text-sm">
-            <thead className="bg-neutral-50 dark:bg-neutral-800">
-              <tr>
-                <th className="text-left p-2">{t('customer')}</th>
-                <th className="text-left p-2">{t('due_date')}</th>
-                <th className="text-left p-2">{t('amount')}</th>
-                <th className="text-left p-2">{t('currency')}</th>
-                <th className="text-left p-2">{t('seller')}</th>
-                <th className="text-left p-2">{t('debt_type')}</th>
-                <th className="text-left p-2">{t('debt_status')}</th>
-                <th className="text-left p-2">{t('created_at')}</th>
-              </tr>
-            </thead>
+          <thead className="bg-neutral-50 dark:bg-neutral-800">
+            <tr>
+              <th className="text-left p-2">
+                {t('customer')}
+                <span className="ml-2 inline-flex gap-1 align-middle">
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'customer', type: 'alpha', dir: 'asc' })}>↑</button>
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'customer', type: 'alpha', dir: 'desc' })}>↓</button>
+                </span>
+              </th>
+              <th className="text-left p-2">
+                {t('due_date')}
+                <span className="ml-2 inline-flex gap-1 align-middle">
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'due_date', type: 'numeric', dir: 'asc' })}>↑</button>
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'due_date', type: 'numeric', dir: 'desc' })}>↓</button>
+                </span>
+              </th>
+              <th className="text-left p-2">
+                {t('amount')}
+                <span className="ml-2 inline-flex gap-1 align-middle">
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'amount', type: 'numeric', dir: 'asc' })}>↑</button>
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'amount', type: 'numeric', dir: 'desc' })}>↓</button>
+                </span>
+              </th>
+              <th className="text-left p-2">
+                {t('currency')}
+                <span className="ml-2 inline-flex gap-1 align-middle">
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'currency', type: 'alpha', dir: 'asc' })}>↑</button>
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'currency', type: 'alpha', dir: 'desc' })}>↓</button>
+                </span>
+              </th>
+              <th className="text-left p-2">
+                {t('seller')}
+                <span className="ml-2 inline-flex gap-1 align-middle">
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'seller', type: 'alpha', dir: 'asc' })}>↑</button>
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'seller', type: 'alpha', dir: 'desc' })}>↓</button>
+                </span>
+              </th>
+              <th className="text-left p-2">
+                {t('debt_type')}
+                <span className="ml-2 inline-flex gap-1 align-middle">
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'type', type: 'alpha', dir: 'asc' })}>↑</button>
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'type', type: 'alpha', dir: 'desc' })}>↓</button>
+                </span>
+              </th>
+              <th className="text-left p-2">
+                {t('debt_status')}
+                <span className="ml-2 inline-flex gap-1 align-middle">
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'status', type: 'alpha', dir: 'asc' })}>↑</button>
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'status', type: 'alpha', dir: 'desc' })}>↓</button>
+                </span>
+              </th>
+              <th className="text-left p-2">
+                {t('created_at')}
+                <span className="ml-2 inline-flex gap-1 align-middle">
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'created_at', type: 'numeric', dir: 'asc' })}>↑</button>
+                  <button className="text-xs" onClick={()=>setSortConfig({ key: 'created_at', type: 'numeric', dir: 'desc' })}>↓</button>
+                </span>
+              </th>
+            </tr>
+            <tr>
+              <th className="text-left p-2"><input value={filterCustomer} onChange={e=>setFilterCustomer(e.target.value)} placeholder={t('customer')} className="border rounded px-2 py-1 w-full" /></th>
+              <th className="text-left p-2"></th>
+              <th className="text-left p-2"></th>
+              <th className="text-left p-2"></th>
+              <th className="text-left p-2"><input value={filterSeller} onChange={e=>setFilterSeller(e.target.value)} placeholder={t('seller')} className="border rounded px-2 py-1 w-full" /></th>
+              <th className="text-left p-2"><input value={filterType} onChange={e=>setFilterType(e.target.value)} placeholder={t('debt_type')} className="border rounded px-2 py-1 w-full" /></th>
+              <th className="text-left p-2"></th>
+              <th className="text-left p-2"></th>
+            </tr>
+          </thead>
             <tbody>
-              {debts.length === 0 ? (
+              {sortedDebts.length === 0 ? (
                 <tr><td className="p-2" colSpan={8}>—</td></tr>
-              ) : debts.map(d => (
+              ) : sortedDebts.map(d => (
                 <tr key={d.id} className={cn('border-t border-neutral-200 dark:border-neutral-800', (new Date(d.due_date).getTime() < Date.now()) ? 'text-red-600' : 'text-green-600')}>
                   <td className="p-2">{d.customer_name || d.customer_id}</td>
                   <td className="p-2">{formatDateDisplay(d.due_date, lang)}</td>
                   <td className="p-2">{d.amount.toFixed(2)}</td>
                   <td className="p-2">{d.currency}</td>
                   <td className="p-2">{d.seller_name || '—'}</td>
-                  <td className="p-2">{(() => { const ty = (d.description || '').replace('type=',''); return ty ? translateType(ty) : '—' })()}</td>
+                  <td className="p-2">{(() => { const ty = getTypeFromDesc(d.description); return ty ? translateType(ty) : '—' })()}</td>
                   <td className="p-2">{d.status}</td>
                   <td className="p-2">{d.created_at ? formatDateDisplay(d.created_at, lang) : '—'}</td>
                 </tr>
@@ -275,10 +471,12 @@ export default function Receivables() {
       </section>
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">{t('receivables_bulk_title')}</h2>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
           <button onClick={downloadTemplate} className="rounded px-3 py-2 border">{t('template_download')}</button>
-          <input type="file" accept=".xlsx,.xls,.csv" onChange={onFile} />
-          <button onClick={submitBulk} disabled={bulkItems.length===0} className="rounded px-4 py-2 bg-neutral-900 text-white disabled:opacity-50">{t('bulk_receivables_create')}</button>
+          <div className="flex flex-col gap-2">
+            <input type="file" accept=".xlsx,.xls,.csv" onChange={onFile} />
+            <button onClick={submitBulk} disabled={bulkItems.length===0} className="rounded px-4 py-2 bg-neutral-900 text-white disabled:opacity-50">{t('bulk_receivables_create')}</button>
+          </div>
         </div>
         {bulkMsg && <div className="text-sm text-red-600">{bulkMsg}</div>}
         {bulkItems.length > 0 && (

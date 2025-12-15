@@ -17,6 +17,55 @@ function slugifyName(name: string) {
     .replace(/^-+|-+$/g, '')
 }
 
+function excelSerialToISODate(n: number) {
+  const ms = Math.round((n - 25569) * 86400 * 1000)
+  const d = new Date(ms)
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function normalizeDate(v: any) {
+  if (v == null) return null
+  if (typeof v === 'number' && isFinite(v)) return excelSerialToISODate(v)
+  if (v instanceof Date) {
+    const y = v.getUTCFullYear()
+    const m = String(v.getUTCMonth() + 1).padStart(2, '0')
+    const day = String(v.getUTCDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+  const s = String(v).trim()
+  if (!s) return null
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+    const [d, m, y] = s.split('/')
+    const mm = String(Number(m)).padStart(2, '0')
+    const dd = String(Number(d)).padStart(2, '0')
+    return `${y}-${mm}-${dd}`
+  }
+  if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(s)) {
+    const [y, m, d] = s.split('/')
+    const mm = String(Number(m)).padStart(2, '0')
+    const dd = String(Number(d)).padStart(2, '0')
+    return `${y}-${mm}-${dd}`
+  }
+  if (/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(s)) {
+    const [d, m, y] = s.split('.')
+    const mm = String(Number(m)).padStart(2, '0')
+    const dd = String(Number(d)).padStart(2, '0')
+    return `${y}-${mm}-${dd}`
+  }
+  if (/^\d{4}\.\d{1,2}\.\d{1,2}$/.test(s)) {
+    const [y, m, d] = s.split('.')
+    const mm = String(Number(m)).padStart(2, '0')
+    const dd = String(Number(d)).padStart(2, '0')
+    return `${y}-${mm}-${dd}`
+  }
+  if (/^\d+$/.test(s)) return excelSerialToISODate(Number(s))
+  return null
+}
+
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
@@ -54,6 +103,12 @@ export default async function handler(req: any, res: any) {
       const amtNum = Number(amount)
       if (!amtNum || amtNum <= 0) {
         results.push({ error: 'Invalid amount', amount, customer_name })
+        continue
+      }
+
+      const dueISO = normalizeDate(due_date)
+      if (!dueISO) {
+        results.push({ error: 'Invalid due_date', due_date, customer_name })
         continue
       }
 
@@ -108,7 +163,7 @@ export default async function handler(req: any, res: any) {
           company_id,
           amount: amtNum,
           currency: pgCurrency,
-          due_date,
+          due_date: dueISO,
           description: `type=${receivable_type}`,
           seller_id,
           remaining_amount: amtNum,

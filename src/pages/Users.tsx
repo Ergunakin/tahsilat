@@ -33,6 +33,10 @@ export default function Users() {
   const [selectedSellerIds, setSelectedSellerIds] = useState<string[]>([])
   const [assignBusy, setAssignBusy] = useState(false)
   const managerNameMap = useMemo(() => Object.fromEntries(users.map(u => [u.id, u.full_name])), [users])
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editFullName, setEditFullName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editRole, setEditRole] = useState<Role>('seller')
 
   useEffect(() => {
     const loadUsers = async () => {
@@ -158,6 +162,7 @@ export default function Users() {
           <table className="min-w-full text-sm">
             <thead className="bg-neutral-50 dark:bg-neutral-800">
               <tr>
+                <th className="text-left p-2">#</th>
                 <th className="text-left p-2">{t('full_name')}</th>
                 <th className="text-left p-2">{t('email')}</th>
                 <th className="text-left p-2">{t('role')}</th>
@@ -167,12 +172,75 @@ export default function Users() {
             </thead>
             <tbody>
               {users.length === 0 ? (
-                <tr><td className="p-2" colSpan={5}>{t('empty_list')}</td></tr>
+                <tr><td className="p-2" colSpan={6}>{t('empty_list')}</td></tr>
               ) : users.map(u => (
                 <tr key={u.id} className="border-t border-neutral-200 dark:border-neutral-800">
+                  <td className="p-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        title={editingId === u.id ? 'OK' : 'Edit'}
+                        className="rounded px-2 py-1 border"
+                        onClick={async () => {
+                          if (editingId === u.id) {
+                            const body = { id: u.id, company_id: company?.id, full_name: editFullName, email: editEmail, role: editRole }
+                            setSavingId(u.id)
+                            try {
+                              const resp = await fetch('/api/users/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+                              const ct = resp.headers.get('content-type') || ''
+                              const isJson = ct.includes('application/json')
+                              const json = isJson ? await resp.json() : { error: await resp.text() }
+                              if (!resp.ok) { alert(json.error || 'Hata'); setSavingId(null); return }
+                              setUsers(prev => prev.map(x => x.id === u.id ? { ...x, full_name: editFullName, email: editEmail, role: editRole } as UserRow : x))
+                              setEditingId(null)
+                              setSavingId(null)
+                            } catch (e: any) {
+                              alert(e?.message || 'Ağ hatası')
+                              setSavingId(null)
+                            }
+                          } else {
+                            setEditingId(u.id)
+                            setEditFullName(u.full_name)
+                            setEditEmail(u.email)
+                            setEditRole(u.role)
+                          }
+                        }}
+                      >{editingId === u.id ? '✓' : '✎'}</button>
+                      <button
+                        title="Delete"
+                        className="rounded px-2 py-1 border"
+                        onClick={async () => {
+                          if (!company?.id) return
+                          if (!confirm('Silmek istediğinize emin misiniz?')) return
+                          try {
+                            const resp = await fetch('/api/users/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: u.id, company_id: company.id }) })
+                            const ct = resp.headers.get('content-type') || ''
+                            const isJson = ct.includes('application/json')
+                            const json = isJson ? await resp.json() : { error: await resp.text() }
+                            if (!resp.ok) { alert(json.error || 'Hata'); return }
+                            setUsers(prev => prev.filter(x => x.id !== u.id))
+                          } catch (e: any) {
+                            alert(e?.message || 'Ağ hatası')
+                          }
+                        }}
+                      >×</button>
+                    </div>
+                  </td>
                   <td className="p-2">{u.full_name}</td>
-                  <td className="p-2">{u.email}</td>
-                  <td className="p-2">{u.role}</td>
+                  <td className="p-2">
+                    {editingId === u.id ? (
+                      <input value={editEmail} onChange={e=>setEditEmail(e.target.value)} className="border rounded px-2 py-1 w-full" />
+                    ) : u.email}
+                  </td>
+                  <td className="p-2">
+                    {editingId === u.id ? (
+                      <select value={editRole} onChange={e=>setEditRole(e.target.value as Role)} className="border rounded px-2 py-1">
+                        <option value="seller">{t('role_seller')}</option>
+                        <option value="manager">{t('role_manager')}</option>
+                        <option value="accountant">{t('role_accountant')}</option>
+                        <option value="admin">{t('role_admin')}</option>
+                      </select>
+                    ) : u.role}
+                  </td>
                   <td className="p-2">
                     {u.role === 'seller' ? (u.manager_id ? managerNameMap[u.manager_id] || '—' : '—') : '—'}
                   </td>
@@ -282,10 +350,12 @@ export default function Users() {
 
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">{t('users_bulk_title')}</h2>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
           <button onClick={downloadTemplate} className="rounded px-3 py-2 border">{t('template_download')}</button>
-          <input type="file" accept=".xlsx,.xls,.csv" onChange={onFile} />
-          <button onClick={submitBulk} disabled={bulkItems.length === 0} className="rounded px-4 py-2 bg-neutral-900 text-white disabled:opacity-50">{t('bulk_create')}</button>
+          <div className="flex flex-col gap-2">
+            <input type="file" accept=".xlsx,.xls,.csv" onChange={onFile} />
+            <button onClick={submitBulk} disabled={bulkItems.length === 0} className="rounded px-4 py-2 bg-neutral-900 text-white disabled:opacity-50">{t('bulk_create')}</button>
+          </div>
         </div>
         <div className="text-sm text-neutral-600">{t('columns_hint')}</div>
         {bulkItems.length > 0 && (
