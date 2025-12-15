@@ -43,12 +43,41 @@ export default function Users() {
   useEffect(() => {
     const loadUsers = async () => {
       if (!company?.id) return
-      const { data } = await supabase
-        .from('users')
-        .select('id,full_name,email,role,manager_id')
-        .eq('company_id', company.id)
-        .order('full_name', { ascending: true })
-      setUsers((data as any) ?? [])
+      try {
+        let urlGet = '/api/users/list?company_id=' + encodeURIComponent(company.id)
+        let urlPost = '/api/users/list'
+        if (import.meta.env.DEV) {
+          if (apiBase && apiBase.length > 0) {
+            urlGet = `${apiBase}/api/users/list?company_id=${encodeURIComponent(company.id)}`
+            urlPost = `${apiBase}/api/users/list`
+          }
+        }
+        const respGet = await fetch(urlGet, { method: 'GET' })
+        if (respGet.ok) {
+          const ct = respGet.headers.get('content-type') || ''
+          const isJson = ct.includes('application/json')
+          const json = isJson ? await respGet.json() : { error: await respGet.text() }
+          if (Array.isArray(json.items)) { setUsers(json.items || []); return }
+        }
+        const respPost = await fetch(urlPost, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ company_id: company.id }) })
+        if (respPost.ok) {
+          const ct = respPost.headers.get('content-type') || ''
+          const isJson = ct.includes('application/json')
+          const json = isJson ? await respPost.json() : { error: await respPost.text() }
+          if (Array.isArray(json.items)) { setUsers(json.items || []); return }
+        }
+      } catch (e) {
+        console.warn('users/list failed', e)
+      }
+      try {
+        const { data } = await supabase
+          .from('users')
+          .select('id,full_name,email,role,manager_id')
+          .eq('company_id', company.id)
+          .order('full_name', { ascending: true })
+        const rows = (data as any) ?? []
+        setUsers(rows)
+      } catch {}
     }
     loadUsers()
   }, [company?.id])
@@ -58,6 +87,8 @@ export default function Users() {
   const [password, setPassword] = useState(genPassword())
   const [msg, setMsg] = useState<string | null>(null)
   const [bulkItems, setBulkItems] = useState<any[]>([])
+  const [exportBusy, setExportBusy] = useState(false)
+  const [exportIncludeTemps, setExportIncludeTemps] = useState(false)
 
   const { t, lang } = useI18n()
   useEffect(() => { setPassword(genPassword()) }, [fullName, email, role])
@@ -168,125 +199,134 @@ export default function Users() {
     <div className="space-y-8">
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">{t('users_list_title')}</h2>
-        <div className="rounded-md border border-neutral-200 dark:border-neutral-800 overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-neutral-50 dark:bg-neutral-800">
-              <tr>
-                <th className="text-left p-2">#</th>
-                <th className="text-left p-2">{t('full_name')}</th>
-                <th className="text-left p-2">{t('email')}</th>
-                <th className="text-left p-2">{t('role')}</th>
-                <th className="text-left p-2">{t('manager')}</th>
-                <th className="text-left p-2">{t('action')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.length === 0 ? (
-                <tr><td className="p-2" colSpan={6}>{t('empty_list')}</td></tr>
-              ) : users.map(u => (
-                <tr key={u.id} className="border-t border-neutral-200 dark:border-neutral-800">
-                  <td className="p-2">
-                    <div className="flex items-center gap-2">
-                      <button
-                        title={editingId === u.id ? 'OK' : 'Edit'}
-                        className="rounded px-2 py-1 border"
-                        onClick={async () => {
-                          if (editingId === u.id) {
-                            const body = { id: u.id, company_id: company?.id, full_name: editFullName, email: editEmail, role: editRole }
-                            setSavingId(u.id)
-                            try {
-                              let url = '/api/users/update'
-                              if (import.meta.env.DEV) {
-                                if (apiBase && apiBase.length > 0) url = `${apiBase}/api/users/update`
-                              }
-                              const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-                              const ct = resp.headers.get('content-type') || ''
-                              const isJson = ct.includes('application/json')
-                              const json = isJson ? await resp.json() : { error: await resp.text() }
-                              if (!resp.ok) { alert(json.error || 'Hata'); setSavingId(null); return }
-                              setUsers(prev => prev.map(x => x.id === u.id ? { ...x, full_name: editFullName, email: editEmail, role: editRole } as UserRow : x))
-                              setEditingId(null)
-                              setSavingId(null)
-                            } catch (e: any) {
-                              alert(e?.message || 'Ağ hatası')
-                              setSavingId(null)
-                            }
-                          } else {
-                            setEditingId(u.id)
-                            setEditFullName(u.full_name)
-                            setEditEmail(u.email)
-                            setEditRole(u.role)
-                          }
-                        }}
-                      >{editingId === u.id ? '✓' : '✎'}</button>
-                      <button
-                        title="Delete"
-                        className="rounded px-2 py-1 border"
-                        onClick={async () => {
-                          if (!company?.id) return
-                          if (!confirm('Silmek istediğinize emin misiniz?')) return
-                          try {
-                            let url = '/api/users/delete'
-                            if (import.meta.env.DEV) {
-                              if (apiBase && apiBase.length > 0) url = `${apiBase}/api/users/delete`
-                            }
-                            const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: u.id, company_id: company.id }) })
-                            const ct = resp.headers.get('content-type') || ''
-                            const isJson = ct.includes('application/json')
-                            const json = isJson ? await resp.json() : { error: await resp.text() }
-                            if (!resp.ok) { alert(json.error || 'Hata'); return }
-                            setUsers(prev => prev.filter(x => x.id !== u.id))
-                          } catch (e: any) {
-                            alert(e?.message || 'Ağ hatası')
-                          }
-                        }}
-                      >×</button>
-                    </div>
-                  </td>
-                  <td className="p-2">
-                    {editingId === u.id ? (
-                      <input value={editFullName} onChange={e=>setEditFullName(e.target.value)} className="border rounded px-2 py-1 w-full" />
-                    ) : u.full_name}
-                  </td>
-                  <td className="p-2">
-                    {editingId === u.id ? (
-                      <input value={editEmail} onChange={e=>setEditEmail(e.target.value)} className="border rounded px-2 py-1 w-full" />
-                    ) : u.email}
-                  </td>
-                  <td className="p-2">
-                    {editingId === u.id ? (
-                      <select value={editRole} onChange={e=>setEditRole(e.target.value as Role)} className="border rounded px-2 py-1">
-                        <option value="seller">{t('role_seller')}</option>
-                        <option value="manager">{t('role_manager')}</option>
-                        <option value="accountant">{t('role_accountant')}</option>
-                        <option value="admin">{t('role_admin')}</option>
-                      </select>
-                    ) : u.role}
-                  </td>
-                  <td className="p-2">
-                    {u.role === 'seller' ? (u.manager_id ? managerNameMap[u.manager_id] || '—' : '—') : '—'}
-                  </td>
-                  <td className="p-2">
-                    {(u.role === 'manager' || u.role === 'admin') && (
-                      <button
-                        onClick={() => {
-                          const teamIds = users
-                            .filter(x => x.manager_id === u.id && (x.role === 'seller' || x.role === 'manager'))
-                            .map(x => x.id)
-                          setSelectedAssigneeIds([u.id, ...teamIds])
-                          setTargetManager(u.id)
-                          setAssignOpen(true)
-                          setAssignError(null)
-                        }}
-                        className="rounded px-3 py-1 border"
-                      >{t('assign_sellers')}</button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="flex items-center gap-3">
+          <button
+            className="rounded px-3 py-2 border"
+            onClick={async ()=>{
+              if (!company?.id) return
+              let url = '/api/users/repair-hierarchy'
+              if (import.meta.env.DEV) {
+                if (apiBase && apiBase.length > 0) url = `${apiBase}/api/users/repair-hierarchy`
+              }
+              const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ company_id: company.id }) })
+              const ct = resp.headers.get('content-type') || ''
+              const isJson = ct.includes('application/json')
+              const json = isJson ? await resp.json() : { error: await resp.text() }
+              if (!resp.ok) { alert(json.error || 'Onarım hata'); return }
+              await (async () => {
+                try {
+                  let urlGet = '/api/users/list?company_id=' + encodeURIComponent(company!.id)
+                  if (import.meta.env.DEV && apiBase && apiBase.length > 0) urlGet = `${apiBase}/api/users/list?company_id=${encodeURIComponent(company!.id)}`
+                  const r = await fetch(urlGet)
+                  if (r.ok) {
+                    const j = await r.json()
+                    setUsers(j.items || [])
+                    return
+                  }
+                } catch {}
+                const { data } = await supabase
+                  .from('users')
+                  .select('id,full_name,email,role,manager_id')
+                  .eq('company_id', company!.id)
+                  .order('full_name', { ascending: true })
+                setUsers((data as any) ?? [])
+              })()
+              alert(`Onarılan kayıt: ${json.repaired ?? 0}`)
+            }}
+          >Hiyerarşiyi Onar</button>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={exportIncludeTemps} onChange={e=>setExportIncludeTemps(e.target.checked)} />
+            Geçici şifre üret
+          </label>
+          <button
+            disabled={exportBusy || !company?.id}
+            className="rounded px-3 py-2 border"
+            onClick={async ()=>{
+              if (!company?.id) return
+              setExportBusy(true)
+              try {
+                let urlGet = `/api/users/export?company_id=${encodeURIComponent(company.id)}&include_temp_passwords=${exportIncludeTemps ? '1' : '0'}`
+                let urlPost = `/api/users/export`
+                if (import.meta.env.DEV && apiBase && apiBase.length > 0) {
+                  urlGet = `${apiBase}/api/users/export?company_id=${encodeURIComponent(company.id)}&include_temp_passwords=${exportIncludeTemps ? '1' : '0'}`
+                  urlPost = `${apiBase}/api/users/export`
+                }
+                let items: any[] = []
+                let ok = false
+                try {
+                  const respGet = await fetch(urlGet, { headers: { 'Accept': 'application/json' } })
+                  const ctGet = respGet.headers.get('content-type') || ''
+                  if (respGet.ok && ctGet.includes('application/json')) {
+                    const j = await respGet.json()
+                    items = j.items || []
+                    ok = true
+                  }
+                } catch {}
+                if (!ok) {
+                  try {
+                    const respPost = await fetch(urlPost, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ company_id: company.id, include_temp_passwords: exportIncludeTemps }) })
+                    const ctPost = respPost.headers.get('content-type') || ''
+                    if (respPost.ok && ctPost.includes('application/json')) {
+                      const j = await respPost.json()
+                      items = j.items || []
+                      ok = true
+                    }
+                  } catch {}
+                }
+                if (!ok) {
+                  const { data, error } = await supabase
+                    .from('users')
+                    .select('id,full_name,email,role,manager_id,created_at')
+                    .eq('company_id', company.id)
+                    .order('full_name', { ascending: true })
+                  const rows = (data as any) ?? []
+                  items = rows.map((u: any) => ({ id: u.id, full_name: u.full_name, email: u.email, role: u.role, manager_id: u.manager_id || null, created_at: u.created_at || null, temp_password: '', note: exportIncludeTemps ? 'geçici şifre üretilmedi' : '' }))
+                }
+                const ws = XLSX.utils.json_to_sheet(items)
+                const wb = XLSX.utils.book_new()
+                XLSX.utils.book_append_sheet(wb, ws, 'Kullanicilar')
+                XLSX.writeFile(wb, 'kullanicilar.xlsx')
+              } catch (e: any) {
+                alert(e?.message || 'İndirme hatası')
+              }
+              setExportBusy(false)
+            }}
+          >Kullanıcıları İndir</button>
         </div>
+        <HierarchyView users={users} companyId={company?.id || ''} apiBase={apiBase} onRefresh={async ()=>{
+          try {
+            let urlGet = '/api/users/list?company_id=' + encodeURIComponent(company!.id)
+            let urlPost = '/api/users/list'
+            if (import.meta.env.DEV) {
+              if (apiBase && apiBase.length > 0) {
+                urlGet = `${apiBase}/api/users/list?company_id=${encodeURIComponent(company!.id)}`
+                urlPost = `${apiBase}/api/users/list`
+              }
+            }
+            const respGet = await fetch(urlGet, { method: 'GET' })
+            if (respGet.ok) {
+              const ct = respGet.headers.get('content-type') || ''
+              const isJson = ct.includes('application/json')
+              const json = isJson ? await respGet.json() : { error: await respGet.text() }
+              if (Array.isArray(json.items)) { setUsers(json.items || []); return }
+            }
+            const respPost = await fetch(urlPost, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ company_id: company!.id }) })
+            if (respPost.ok) {
+              const ct = respPost.headers.get('content-type') || ''
+              const isJson = ct.includes('application/json')
+              const json = isJson ? await respPost.json() : { error: await respPost.text() }
+              if (Array.isArray(json.items)) { setUsers(json.items || []); return }
+            }
+          } catch {}
+          try {
+            const { data } = await supabase
+              .from('users')
+              .select('id,full_name,email,role,manager_id')
+              .eq('company_id', company!.id)
+              .order('full_name', { ascending: true })
+            setUsers((data as any) ?? [])
+          } catch {}
+        }} />
         {assignError && <div className="text-sm text-red-600 mt-2">{assignError}</div>}
       </section>
       {assignOpen && (
@@ -356,7 +396,13 @@ export default function Users() {
                     const isJson = ct.includes('application/json')
                     const json = isJson ? await resp.json() : { error: await resp.text() }
                     if (!resp.ok) { setAssignError(json.error || 'Atama hatası'); setAssignBusy(false); return }
-                    setUsers(prev => prev.map(u => selectedAssigneeIds.includes(u.id) ? { ...u, manager_id: targetManager } : u))
+                    // Refresh from server to reflect all descendants updates
+                    const { data } = await supabase
+                      .from('users')
+                      .select('id,full_name,email,role,manager_id')
+                      .eq('company_id', company!.id)
+                      .order('full_name', { ascending: true })
+                    setUsers((data as any) ?? [])
                     setAssignBusy(false)
                     setAssignOpen(false)
                   } catch (err: any) {
@@ -438,6 +484,179 @@ export default function Users() {
           </div>
         )}
       </section>
+    </div>
+  )
+}
+
+function HierarchyView({ users, companyId, apiBase, onRefresh }: { users: UserRow[]; companyId: string; apiBase?: string; onRefresh: ()=>void }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const byManager: Record<string, UserRow[]> = useMemo(() => {
+    const m: Record<string, UserRow[]> = {}
+    users.forEach(u => {
+      if (u.manager_id) {
+        const arr = m[u.manager_id] || (m[u.manager_id] = [])
+        if (u.role === 'seller' || u.role === 'manager') arr.push(u)
+      }
+    })
+    Object.values(m).forEach(arr => arr.sort((a,b)=>a.full_name.localeCompare(b.full_name)))
+    return m
+  }, [users])
+  const roots = useMemo(() => {
+    const mgrs = users.filter(u => u.role === 'manager')
+    const top = mgrs.filter(u => {
+      const parent = users.find(p => p.id === u.manager_id)
+      return !parent || parent.role !== 'manager'
+    })
+    const list = top.length ? top : mgrs
+    return list.sort((a,b)=>a.full_name.localeCompare(b.full_name))
+  }, [users])
+  const childrenOf = (id: string) => byManager[id] || []
+  const unassignedSellers = useMemo(() => {
+    return users
+      .filter(u => u.role === 'seller' && (!u.manager_id || !users.find(p => p.id === u.manager_id && p.role === 'manager')))
+      .sort((a,b)=>a.full_name.localeCompare(b.full_name))
+  }, [users])
+  const isDescendant = useMemo(() => {
+    const memo: Record<string, Set<string>> = {}
+    const build = (start: string) => {
+      if (memo[start]) return memo[start]
+      const set = new Set<string>()
+      const stack = [...(byManager[start] || [])]
+      while (stack.length) {
+        const n = stack.pop()!
+        if (set.has(n.id)) continue
+        set.add(n.id)
+        const kids = byManager[n.id] || []
+        kids.forEach(k => stack.push(k))
+      }
+      memo[start] = set
+      return set
+    }
+    return (a: string, b: string) => build(a).has(b)
+  }, [byManager])
+  const onDropAssign = async (dragId: string, targetId: string) => {
+    if (!companyId) return
+    setErr(null)
+    setBusy(true)
+    try {
+      let url = '/api/users/assign-manager'
+      if (import.meta.env.DEV) {
+        if (apiBase && apiBase.length > 0) url = `${apiBase}/api/users/assign-manager`
+      }
+      const resp = await fetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: companyId, target_manager_id: targetId, ids: [dragId] })
+      })
+      const ct = resp.headers.get('content-type') || ''
+      const isJson = ct.includes('application/json')
+      const json = isJson ? await resp.json() : { error: await resp.text() }
+      if (!resp.ok) { setErr(json.error || 'Atama hatası'); setBusy(false); return }
+      await onRefresh()
+    } catch (e: any) {
+      setErr(e?.message || 'Ağ hatası')
+    }
+    setBusy(false)
+  }
+  return (
+    <div className="rounded-md border border-neutral-200 dark:border-neutral-800 p-3">
+      {err && <div className="text-sm text-red-600 mb-2">{err}</div>}
+      <div className="space-y-2">
+        {roots.length === 0 ? (
+          <div>
+            <div className="text-sm font-medium mb-1">Atanmamış Satıcılar</div>
+            {unassignedSellers.length === 0 ? (
+              <div className="text-sm">—</div>
+            ) : (
+              <div className="space-y-1">
+                {unassignedSellers.map(s => (
+                  <div key={s.id}
+                    className="flex items-center gap-2 rounded px-2 py-1 border hover:bg-neutral-50 dark:hover:bg-neutral-800"
+                    draggable
+                    onDragStart={(e)=>{
+                      e.dataTransfer.setData('text/plain', JSON.stringify({ id: s.id, role: s.role }))
+                    }}
+                  >
+                    <span className="text-sm">{s.full_name}</span>
+                    <span className="text-xs text-neutral-600">{s.role}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="text-xs text-neutral-500 mt-2">Satıcıyı bir yönetici üzerine sürükleyerek atayın</div>
+          </div>
+        ) : roots.map(r => (
+          <TreeNode key={r.id} node={r} childrenFn={childrenOf} isDescendant={isDescendant} onAssign={onDropAssign} visited={new Set([r.id])} depth={0} />
+        ))}
+      </div>
+      {roots.length > 0 && unassignedSellers.length > 0 && (
+        <div className="mt-4">
+          <div className="text-sm font-medium mb-1">Atanmamış Satıcılar</div>
+          <div className="space-y-1">
+            {unassignedSellers.map(s => (
+              <div key={s.id}
+                className="flex items-center gap-2 rounded px-2 py-1 border hover:bg-neutral-50 dark:hover:bg-neutral-800"
+                draggable
+                onDragStart={(e)=>{
+                  e.dataTransfer.setData('text/plain', JSON.stringify({ id: s.id, role: s.role }))
+                }}
+              >
+                <span className="text-sm">{s.full_name}</span>
+                <span className="text-xs text-neutral-600">{s.role}</span>
+              </div>
+            ))}
+          </div>
+          <div className="text-xs text-neutral-500 mt-2">Satıcıyı bir yönetici üzerine sürükleyerek atayın</div>
+        </div>
+      )}
+      {busy && <div className="text-xs text-neutral-500 mt-2">İşleniyor…</div>}
+    </div>
+  )
+}
+
+function TreeNode({ node, childrenFn, isDescendant, onAssign, visited, depth = 0 }: { node: UserRow; childrenFn: (id: string)=>UserRow[]; isDescendant: (a:string,b:string)=>boolean; onAssign: (dragId:string,targetId:string)=>void; visited: Set<string>; depth?: number }) {
+  if (depth > 50) return null
+  const kids = (childrenFn(node.id) || []).filter(k => !visited.has(k.id))
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+    e.dataTransfer.setData('text/plain', JSON.stringify({ id: node.id, role: node.role }))
+  }
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+  }
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    try {
+      const raw = e.dataTransfer.getData('text/plain')
+      const obj = JSON.parse(raw || '{}')
+      const dragId = obj.id as string
+      const dragRole = obj.role as Role
+      if (!dragId) return
+      if (dragId === node.id) return
+      if (node.role !== 'manager') return
+      if (isDescendant(dragId, node.id)) return
+      if (dragRole !== 'seller' && dragRole !== 'manager') return
+      onAssign(dragId, node.id)
+    } catch {}
+  }
+  return (
+    <div className="pl-2">
+      <div
+        className="flex items-center gap-2 rounded px-2 py-1 border hover:bg-neutral-50 dark:hover:bg-neutral-800"
+        draggable
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        <span className="text-sm font-medium">{node.full_name}</span>
+        <span className="text-xs text-neutral-600">{node.role}</span>
+      </div>
+      {kids.length > 0 && (
+        <div className="pl-4 mt-1 space-y-1">
+          {kids.map(k => (
+            <TreeNode key={k.id} node={k} childrenFn={childrenFn} isDescendant={isDescendant} onAssign={onAssign} visited={new Set([...visited, k.id])} depth={depth + 1} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
