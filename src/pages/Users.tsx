@@ -27,11 +27,12 @@ export default function Users() {
   const [users, setUsers] = useState<UserRow[]>([])
   const managers = useMemo(() => users.filter(u => u.role === 'manager' || u.role === 'admin').sort((a,b)=>a.full_name.localeCompare(b.full_name)), [users])
   const sellers = useMemo(() => users.filter(u => u.role === 'seller').sort((a,b)=>a.full_name.localeCompare(b.full_name)), [users])
+  const assignables = useMemo(() => users.filter(u => u.role === 'seller' || u.role === 'manager').sort((a,b)=>a.full_name.localeCompare(b.full_name)), [users])
   const [savingId, setSavingId] = useState<string | null>(null)
   const [assignError, setAssignError] = useState<string | null>(null)
   const [assignOpen, setAssignOpen] = useState(false)
   const [targetManager, setTargetManager] = useState<string>('')
-  const [selectedSellerIds, setSelectedSellerIds] = useState<string[]>([])
+  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([])
   const [assignBusy, setAssignBusy] = useState(false)
   const managerNameMap = useMemo(() => Object.fromEntries(users.map(u => [u.id, u.full_name])), [users])
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -268,7 +269,15 @@ export default function Users() {
                   <td className="p-2">
                     {(u.role === 'manager' || u.role === 'admin') && (
                       <button
-                        onClick={() => { setTargetManager(u.id); setAssignOpen(true); setSelectedSellerIds([]); setAssignError(null) }}
+                        onClick={() => {
+                          const teamIds = users
+                            .filter(x => x.manager_id === u.id && (x.role === 'seller' || x.role === 'manager'))
+                            .map(x => x.id)
+                          setSelectedAssigneeIds([u.id, ...teamIds])
+                          setTargetManager(u.id)
+                          setAssignOpen(true)
+                          setAssignError(null)
+                        }}
                         className="rounded px-3 py-1 border"
                       >{t('assign_sellers')}</button>
                     )}
@@ -288,15 +297,15 @@ export default function Users() {
               <button onClick={()=>{ setAssignOpen(false) }} className="rounded px-2 py-1 border">{t('close')}</button>
             </div>
             <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <label className="text-sm">{t('manager')}</label>
-                <select value={targetManager} onChange={e=>setTargetManager(e.target.value)} className="border rounded px-2 py-1">
-                  <option value="">{t('select')}</option>
-                  {managers.map(m => (<option key={m.id} value={m.id}>{m.full_name}</option>))}
-                </select>
-                <button onClick={()=>setSelectedSellerIds(sellers.map(s=>s.id))} className="rounded px-2 py-1 border">{t('select_all')}</button>
-                <button onClick={()=>setSelectedSellerIds([])} className="rounded px-2 py-1 border">{t('clear')}</button>
-              </div>
+            <div className="flex items-center gap-3">
+              <label className="text-sm">{t('manager')}</label>
+              <select value={targetManager} onChange={e=>setTargetManager(e.target.value)} className="border rounded px-2 py-1">
+                <option value="">{t('select')}</option>
+                {managers.map(m => (<option key={m.id} value={m.id}>{m.full_name}</option>))}
+              </select>
+              <button onClick={()=>setSelectedAssigneeIds(assignables.map(a=>a.id))} className="rounded px-2 py-1 border">{t('select_all')}</button>
+              <button onClick={()=>setSelectedAssigneeIds([])} className="rounded px-2 py-1 border">{t('clear')}</button>
+            </div>
               <div className="rounded-md border border-neutral-200 dark:border-neutral-800 overflow-x-auto max-h-80 overflow-y-auto">
                 <table className="min-w-full text-sm">
                   <thead className="bg-neutral-50 dark:bg-neutral-800 sticky top-0">
@@ -304,23 +313,25 @@ export default function Users() {
                       <th className="text-left p-2">{t('select')}</th>
                       <th className="text-left p-2">{t('full_name')}</th>
                       <th className="text-left p-2">{t('email')}</th>
+                      <th className="text-left p-2">{t('role')}</th>
                       <th className="text-left p-2">{t('current_manager')}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {sellers.map(s => {
-                      const checked = selectedSellerIds.includes(s.id)
+                    {assignables.map(a => {
+                      const checked = selectedAssigneeIds.includes(a.id)
                       return (
-                        <tr key={s.id} className="border-t border-neutral-200 dark:border-neutral-800">
+                        <tr key={a.id} className="border-t border-neutral-200 dark:border-neutral-800">
                           <td className="p-2">
                             <input type="checkbox" checked={checked} onChange={(e)=>{
                               const on = e.target.checked
-                              setSelectedSellerIds(prev => on ? [...prev, s.id] : prev.filter(id => id !== s.id))
+                              setSelectedAssigneeIds(prev => on ? [...prev, a.id] : prev.filter(id => id !== a.id))
                             }} />
                           </td>
-                          <td className="p-2">{s.full_name}</td>
-                          <td className="p-2">{s.email}</td>
-                          <td className="p-2">{s.manager_id ? managerNameMap[s.manager_id] || '—' : '—'}</td>
+                          <td className="p-2">{a.full_name}</td>
+                          <td className="p-2">{a.email}</td>
+                          <td className="p-2">{a.role}</td>
+                          <td className="p-2">{a.manager_id ? managerNameMap[a.manager_id] || '—' : '—'}</td>
                         </tr>
                       )
                     })}
@@ -329,16 +340,23 @@ export default function Users() {
               </div>
               <div className="flex items-center justify-end gap-3">
                 <button onClick={()=>setAssignOpen(false)} className="rounded px-3 py-2 border">{t('cancel')}</button>
-                <button disabled={!targetManager || selectedSellerIds.length===0 || assignBusy} onClick={async ()=>{
+                <button disabled={!company?.id || !targetManager || selectedAssigneeIds.length===0 || assignBusy} onClick={async ()=>{
                   setAssignError(null)
                   setAssignBusy(true)
                   try {
-                    const { error } = await supabase
-                      .from('users')
-                      .update({ manager_id: targetManager })
-                      .in('id', selectedSellerIds)
-                    if (error) { setAssignError(error.message || 'Atama hatası'); setAssignBusy(false); return }
-                    setUsers(prev => prev.map(u => selectedSellerIds.includes(u.id) ? { ...u, manager_id: targetManager } : u))
+                    let url = '/api/users/assign-manager'
+                    if (import.meta.env.DEV) {
+                      if (apiBase && apiBase.length > 0) url = `${apiBase}/api/users/assign-manager`
+                    }
+                    const resp = await fetch(url, {
+                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ company_id: company!.id, target_manager_id: targetManager, ids: Array.from(new Set(selectedAssigneeIds)) })
+                    })
+                    const ct = resp.headers.get('content-type') || ''
+                    const isJson = ct.includes('application/json')
+                    const json = isJson ? await resp.json() : { error: await resp.text() }
+                    if (!resp.ok) { setAssignError(json.error || 'Atama hatası'); setAssignBusy(false); return }
+                    setUsers(prev => prev.map(u => selectedAssigneeIds.includes(u.id) ? { ...u, manager_id: targetManager } : u))
                     setAssignBusy(false)
                     setAssignOpen(false)
                   } catch (err: any) {
