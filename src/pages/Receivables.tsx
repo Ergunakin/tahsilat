@@ -118,6 +118,14 @@ export default function Receivables() {
     }
     loadSettings()
   }, [company?.id])
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser()
+        setCurrentUserId(data?.user?.id || null)
+      } catch {}
+    })()
+  }, [])
   const currencies: string[] = useMemo(() => settingCurrencies, [settingCurrencies])
   const debtTypes: string[] = useMemo(() => settingTypes, [settingTypes])
   const translateType = (ty: string) => {
@@ -196,6 +204,17 @@ export default function Receivables() {
   }, [debts, filterCustomer, filterSeller, filterType])
 
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [collectForId, setCollectForId] = useState<string | null>(null)
+  const [noteForId, setNoteForId] = useState<string | null>(null)
+  const [collectAmount, setCollectAmount] = useState('')
+  const [collectBusy, setCollectBusy] = useState(false)
+  const [noteBusy, setNoteBusy] = useState(false)
+  const [noteContent, setNoteContent] = useState('')
+  const [noteContact, setNoteContact] = useState('')
+  const [notePhone, setNotePhone] = useState('')
+  const [promiseDate, setPromiseDate] = useState('')
+  const [promiseAmount, setPromiseAmount] = useState('')
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [editCustomer, setEditCustomer] = useState('')
   const [editDueDate, setEditDueDate] = useState('')
   const [editAmount, setEditAmount] = useState('')
@@ -625,7 +644,11 @@ export default function Receivables() {
                       <td className="p-2">{d.created_at ? formatDateDisplay(d.created_at, lang) : '—'}</td>
                       <td className="p-2">
                         {(currentRole === 'admin' || currentRole === 'accountant') && (
-                          <button className="text-xs rounded px-2 py-1 border" onClick={()=>{ setEditingId(d.id); setEditCustomer(d.customer_name || ''); setEditDueDate(d.due_date || ''); setEditAmount(String(d.amount)); setEditCurrency(String(d.currency).toUpperCase() === 'TRY' ? 'TL' : String(d.currency).toUpperCase()); setEditType(getTypeFromDesc(d.description) || 'Senet'); setEditSellerId(d.seller_id || '') }}>✎</button>
+                          <div className="flex items-center gap-2">
+                            <button className="text-xs rounded px-2 py-1 border" title="Düzenle" onClick={()=>{ setEditingId(d.id); setEditCustomer(d.customer_name || ''); setEditDueDate(d.due_date || ''); setEditAmount(String(d.amount)); setEditCurrency(String(d.currency).toUpperCase() === 'TRY' ? 'TL' : String(d.currency).toUpperCase()); setEditType(getTypeFromDesc(d.description) || 'Senet'); setEditSellerId(d.seller_id || '') }}>⚙</button>
+                            <button className="text-xs rounded px-2 py-1 border" title="Not" onClick={()=>{ setNoteForId(d.id); setNoteContent(''); setNoteContact(''); setNotePhone(''); setPromiseDate(''); setPromiseAmount(''); }}>✎</button>
+                            <button className="text-xs rounded px-2 py-1 border" title="Tahsilat" onClick={()=>{ setCollectForId(d.id); setCollectAmount(String((d as any).remaining_amount || d.amount)); }}>💲</button>
+                          </div>
                         )}
                       </td>
                       <td className="p-2">
@@ -689,6 +712,145 @@ export default function Receivables() {
           </table>
         </div>
       </section>
+      {collectForId && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-neutral-900 rounded-md w-[520px] max-w-full p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-lg font-semibold">Tahsilat</div>
+              <button onClick={()=>setCollectForId(null)} className="rounded px-2 py-1 border">Kapat</button>
+            </div>
+            {(() => {
+              const debt = debts.find(x => x.id === collectForId)
+              if (!debt) return <div className="text-sm">Kayıt bulunamadı</div>
+              return (
+                <div className="space-y-3">
+                  <div className="text-sm">Müşteri: {debt.customer_name || debt.customer_id}</div>
+                  <div className="text-sm">Vade: {formatDateDisplay(debt.due_date, lang)} | Para Birimi: {debt.currency}</div>
+                  <div className="text-sm">Kalan: {Number((debt as any).remaining_amount ?? debt.amount).toFixed(2)}</div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm">Tahsilat Tutarı</label>
+                    <input value={collectAmount} onChange={e=>setCollectAmount(e.target.value)} className="border rounded px-2 py-1" />
+                    <button disabled={collectBusy} className="rounded px-3 py-1 bg-neutral-900 text-white" onClick={async ()=>{
+                      if (!company?.id) return
+                      const amt = Number(collectAmount)
+                      if (!isFinite(amt) || amt <= 0) { alert('Tutar geçersiz'); return }
+                      setCollectBusy(true)
+                      try {
+                        const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+                        const apiBase = rawBase ? rawBase.replace(/\/+$/, '') : undefined
+                        let ok = false
+                        try {
+                          const rLocal = await fetch('/api/debts/manage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'collect', company_id: company.id, debt_id: debt.id, amount: amt, recorded_by: currentUserId, notes: '' }) })
+                          const ctLocal = rLocal.headers.get('content-type') || ''
+                          if (rLocal.ok && ctLocal.includes('application/json')) ok = true
+                        } catch {}
+                        if (!ok && import.meta.env.DEV && apiBase && apiBase.length > 0) {
+                          const rRemote = await fetch(`${apiBase}/api/debts/manage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'collect', company_id: company.id, debt_id: debt.id, amount: amt, recorded_by: currentUserId, notes: '' }) })
+                          const ctRemote = rRemote.headers.get('content-type') || ''
+                          if (!(rRemote.ok && ctRemote.includes('application/json'))) {
+                            const msg = ctRemote.includes('application/json') ? (await rRemote.json()).error : await rRemote.text()
+                            alert(msg || 'Tahsilat hatası')
+                            setCollectBusy(false)
+                            return
+                          }
+                        }
+                        const { data } = await supabase
+                          .from('debts')
+                          .select('id,customer_id,amount,currency,due_date,seller_id,status,description,created_at,remaining_amount')
+                          .eq('company_id', company.id)
+                          .order('due_date', { ascending: true })
+                        const rows = (data as any[] || []) as DebtRow[]
+                        const custIds = Array.from(new Set(rows.map(r => r.customer_id).filter(Boolean))) as string[]
+                        const sellerIds = Array.from(new Set(rows.map(r => r.seller_id).filter(Boolean))) as string[]
+                        let custMap: Record<string,string> = {}
+                        let sellerMap: Record<string,string> = {}
+                        if (custIds.length) {
+                          const { data: custs } = await supabase
+                            .from('customers')
+                            .select('id,name')
+                            .in('id', custIds)
+                          custMap = Object.fromEntries((custs || []).map(c => [c.id, c.name]))
+                        }
+                        if (sellerIds.length) {
+                          const { data: us } = await supabase
+                            .from('users')
+                            .select('id,full_name')
+                            .in('id', sellerIds)
+                          sellerMap = Object.fromEntries((us || []).map(u => [u.id, u.full_name]))
+                        }
+                        setDebts(rows.map(r => ({ ...r, customer_name: custMap[r.customer_id], seller_name: r.seller_id ? sellerMap[r.seller_id] : undefined })))
+                        setCollectForId(null)
+                      } catch (e: any) {
+                        alert(e?.message || 'Ağ hatası')
+                      }
+                      setCollectBusy(false)
+                    }}>Kaydet</button>
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+        </div>
+      )}
+      {noteForId && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-neutral-900 rounded-md w-[640px] max-w-full p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-lg font-semibold">Not / Görüşme</div>
+              <button onClick={()=>setNoteForId(null)} className="rounded px-2 py-1 border">Kapat</button>
+            </div>
+            {(() => {
+              const debt = debts.find(x => x.id === noteForId)
+              if (!debt) return <div className="text-sm">Kayıt bulunamadı</div>
+              return (
+                <div className="space-y-3">
+                  <div className="text-sm">Müşteri: {debt.customer_name || debt.customer_id}</div>
+                  <div className="text-sm">Vade: {formatDateDisplay(debt.due_date, lang)} | Para Birimi: {debt.currency}</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input value={noteContact} onChange={e=>setNoteContact(e.target.value)} className="border rounded px-2 py-1" placeholder="İlgili kişi" />
+                    <input value={notePhone} onChange={e=>setNotePhone(e.target.value)} className="border rounded px-2 py-1" placeholder="Telefon" />
+                    <textarea value={noteContent} onChange={e=>setNoteContent(e.target.value)} className="border rounded px-2 py-1 sm:col-span-2" placeholder="Görüşme notu" />
+                    <input type="date" value={promiseDate} onChange={e=>setPromiseDate(e.target.value)} className="border rounded px-2 py-1" placeholder="Ödeme sözü tarihi" />
+                    <input value={promiseAmount} onChange={e=>setPromiseAmount(e.target.value)} className="border rounded px-2 py-1" placeholder="Ödeme sözü tutarı" />
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <button disabled={noteBusy} className="rounded px-3 py-1 bg-neutral-900 text-white" onClick={async ()=>{
+                      if (!company?.id) return
+                      if (!noteContent.trim()) { alert('Not girin'); return }
+                      setNoteBusy(true)
+                      try {
+                        const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+                        const apiBase = rawBase ? rawBase.replace(/\/+$/, '') : undefined
+                        let ok = false
+                        const payload = { action: 'note', company_id: company.id, debt_id: debt.id, content: noteContent.trim(), created_by: currentUserId, contact_person: noteContact.trim() || undefined, phone: notePhone.trim() || undefined, promise_date: promiseDate || undefined, promised_amount: promiseAmount ? Number(promiseAmount) : undefined, currency: debt.currency }
+                        try {
+                          const rLocal = await fetch('/api/debts/manage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+                          const ctLocal = rLocal.headers.get('content-type') || ''
+                          if (rLocal.ok && ctLocal.includes('application/json')) ok = true
+                        } catch {}
+                        if (!ok && import.meta.env.DEV && apiBase && apiBase.length > 0) {
+                          const rRemote = await fetch(`${apiBase}/api/debts/manage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+                          const ctRemote = rRemote.headers.get('content-type') || ''
+                          if (!(rRemote.ok && ctRemote.includes('application/json'))) {
+                            const msg = ctRemote.includes('application/json') ? (await rRemote.json()).error : await rRemote.text()
+                            alert(msg || 'Not kaydetme hatası')
+                            setNoteBusy(false)
+                            return
+                          }
+                        }
+                        setNoteForId(null)
+                      } catch (e: any) {
+                        alert(e?.message || 'Ağ hatası')
+                      }
+                      setNoteBusy(false)
+                    }}>Kaydet</button>
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+        </div>
+      )}
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">{t('receivables_bulk_title')}</h2>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
