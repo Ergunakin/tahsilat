@@ -739,11 +739,17 @@ export default function Receivables() {
                     <td className="p-2 text-xs text-neutral-700 dark:text-neutral-300" colSpan={10}>
                       {timelineBusy ? 'Yükleniyor…' : (
                         timelineItems.length === 0 ? '—' : (
-                          <ul className="space-y-1">
-                            {timelineItems.map((it, idx) => (
-                              <li key={idx}>{it.text}</li>
+                          <div className="relative pl-6">
+                            <div className="absolute left-2 top-0 bottom-0 w-[2px] bg-neutral-200"></div>
+                            {timelineItems.map((it: any, idx: number) => (
+                              <div key={idx} className="relative mb-1">
+                                <span className="absolute left-0 top-0">
+                                  {it.kind === 'promise' ? '📅' : '📞'}
+                                </span>
+                                <span className="ml-4 text-xs">{it.text}</span>
+                              </div>
                             ))}
-                          </ul>
+                          </div>
                         )
                       )}
                     </td>

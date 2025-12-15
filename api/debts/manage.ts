@@ -54,16 +54,24 @@ export default async function handler(req: any, res: any) {
         }
         return best
       }
+      const matchedPromiseIds = new Set<string>()
       const items = (notes || []).map((n: any) => {
         const contactMatch = String(n.content || '').match(/^Kişi:\s*(.*?)\s*\|\s*(.*)$/)
         const contact = contactMatch ? contactMatch[1] : ''
         const body = contactMatch ? contactMatch[2] : String(n.content || '')
         const prom = nearestPromise(n.created_by || null, n.created_at || null)
         const promText = prom ? `, Ödeme Sözü: ${prom.promised_date}` : ''
+        if (prom?.id) matchedPromiseIds.add(String(prom.id))
         const who = userMap[n.created_by || ''] || '—'
         const sentence = `Telefon: ${phone || '—'}, Kişi: ${contact || '—'}, Not: ${body}${promText}, Görüşen: ${who}`
-        return { text: sentence, created_at: n.created_at }
+        return { kind: 'note', text: sentence, created_at: n.created_at }
       })
+      for (const p of promises || []) {
+        if (matchedPromiseIds.has(String(p.id))) continue
+        const who = userMap[p.created_by || ''] || '—'
+        const sentence = `Ödeme Sözü: ${p.promised_date} - Tutar: ${Number(p.promised_amount || 0).toFixed(2)} ${String(p.currency || '').toUpperCase()} - Oluşturan: ${who}`
+        items.push({ kind: 'promise', text: sentence, created_at: p.created_at })
+      }
       return res.status(200).json({ items })
     }
     if (action === 'collect') {
