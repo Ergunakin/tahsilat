@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tsconfigPaths from "vite-tsconfig-paths";
 import { traeBadgePlugin } from 'vite-plugin-trae-solo-badge';
+import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -37,7 +38,23 @@ export default defineConfig(({ mode }) => {
         autoTheme: true,
         autoThemeTarget: '#root'
       }), 
-      tsconfigPaths()
+      tsconfigPaths(),
+      VitePWA({
+        registerType: 'autoUpdate',
+        includeAssets: ['favicon.svg'],
+        manifest: {
+          name: 'Yeni Proje',
+          short_name: 'Tahsilat',
+          start_url: '/',
+          display: 'standalone',
+          background_color: '#ffffff',
+          theme_color: '#111111',
+          icons: [
+            { src: '/favicon.svg', sizes: '192x192', type: 'image/svg+xml' },
+            { src: '/favicon.svg', sizes: '512x512', type: 'image/svg+xml' }
+          ]
+        }
+      })
     ],
   }
 })
