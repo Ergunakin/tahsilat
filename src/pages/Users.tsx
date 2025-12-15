@@ -671,9 +671,9 @@ function TreeNode({ node, childrenFn, isDescendant, onAssign, onRefresh, visited
                 if (!company?.id) return
                 setErr(null); setSaving(true)
                 try {
-                  let url = '/api/users/update'
-                  if (import.meta.env.DEV && apiBase && apiBase.length > 0) url = `${apiBase}/api/users/update`
-                  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: node.id, company_id: company.id, full_name: name, email }) })
+                  let url = '/api/users/manage'
+                  if (import.meta.env.DEV && apiBase && apiBase.length > 0) url = `${apiBase}/api/users/manage`
+                  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', id: node.id, company_id: company.id, full_name: name, email }) })
                   const ct = resp.headers.get('content-type') || ''
                   const isJson = ct.includes('application/json')
                   const json = isJson ? await resp.json() : { error: await resp.text() }
@@ -727,12 +727,12 @@ function TreeNode({ node, childrenFn, isDescendant, onAssign, onRefresh, visited
                 // Prefer local API (updated logic), then fallback to remote base if configured
                 let ok = false
                 try {
-                  const respLocal = await fetch('/api/users/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: node.id, company_id: company.id }) })
+                  const respLocal = await fetch('/api/users/manage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id: node.id, company_id: company.id }) })
                   const ctLocal = respLocal.headers.get('content-type') || ''
                   if (respLocal.ok && ctLocal.includes('application/json')) { ok = true }
                 } catch {}
                 if (!ok && import.meta.env.DEV && apiBase && apiBase.length > 0) {
-                  const respRemote = await fetch(`${apiBase}/api/users/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: node.id, company_id: company.id }) })
+                  const respRemote = await fetch(`${apiBase}/api/users/manage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id: node.id, company_id: company.id }) })
                   const ctRemote = respRemote.headers.get('content-type') || ''
                   if (!(respRemote.ok && ctRemote.includes('application/json'))) {
                     const msg = ctRemote.includes('application/json') ? (await respRemote.json()).error : await respRemote.text()
@@ -781,12 +781,12 @@ function TreeNode({ node, childrenFn, isDescendant, onAssign, onRefresh, visited
                 if (!confirm('Silmek istediğinizden emin misiniz?')) { setReassignBusy(false); return }
                 let okDel = false
                 try {
-                  const respLocal = await fetch('/api/users/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: node.id, company_id: company.id }) })
+                const respLocal = await fetch('/api/users/manage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id: node.id, company_id: company.id }) })
                   const ctLocal = respLocal.headers.get('content-type') || ''
                   if (respLocal.ok && ctLocal.includes('application/json')) { okDel = true }
                 } catch {}
                 if (!okDel && import.meta.env.DEV && apiBase && apiBase.length > 0) {
-                  const respRemote = await fetch(`${apiBase}/api/users/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: node.id, company_id: company.id }) })
+                  const respRemote = await fetch(`${apiBase}/api/users/manage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id: node.id, company_id: company.id }) })
                   const ctRemote = respRemote.headers.get('content-type') || ''
                   if (!(respRemote.ok && ctRemote.includes('application/json'))) {
                     const msg = ctRemote.includes('application/json') ? (await respRemote.json()).error : await respRemote.text()
