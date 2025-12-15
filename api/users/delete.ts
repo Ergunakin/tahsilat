@@ -27,6 +27,12 @@ export default async function handler(req: any, res: any) {
       if (unassignErr) return res.status(500).json({ error: unassignErr.message })
     }
 
+    // Also clear manager's own manager_id to avoid any self/loop reference noise
+    await admin
+      .from('users')
+      .update({ manager_id: null })
+      .eq('id', id)
+
     const { error: delAuthErr } = await admin.auth.admin.deleteUser(id)
     if (delAuthErr && !String(delAuthErr.message || '').toLowerCase().includes('not found')) {
       return res.status(500).json({ error: delAuthErr.message })
@@ -35,7 +41,6 @@ export default async function handler(req: any, res: any) {
       .from('users')
       .delete()
       .eq('id', id)
-      .eq('company_id', company_id)
     if (delRowErr) return res.status(500).json({ error: delRowErr.message })
     return res.status(200).json({ id })
   } catch (e: any) {

@@ -625,6 +625,11 @@ function TreeNode({ node, childrenFn, isDescendant, onAssign, onRefresh, visited
   const [name, setName] = useState(node.full_name)
   const [email, setEmail] = useState(node.email)
   const [err, setErr] = useState<string | null>(null)
+  const [reassignOpen, setReassignOpen] = useState(false)
+  const [reassignBusy, setReassignBusy] = useState(false)
+  const [reassignTarget, setReassignTarget] = useState('')
+  const [hasDebts, setHasDebts] = useState<boolean | null>(null)
+  const [candidates, setCandidates] = useState<UserRow[]>([])
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
     e.dataTransfer.setData('text/plain', JSON.stringify({ id: node.id, role: node.role }))
   }
@@ -694,6 +699,29 @@ function TreeNode({ node, childrenFn, isDescendant, onAssign, onRefresh, visited
               e.stopPropagation()
               e.preventDefault()
               if (!company?.id) return
+              // Check if this user is referenced by debts
+              try {
+                const { data, count } = await supabase
+                  .from('debts')
+                  .select('id', { count: 'exact' })
+                  .eq('company_id', company.id)
+                  .eq('seller_id', node.id)
+                  .limit(1)
+                const has = ((count || 0) > 0) || ((data || []).length > 0)
+                setHasDebts(has)
+                if (has) {
+                  // load candidates
+                  const { data: usersData } = await supabase
+                    .from('users')
+                    .select('id,full_name,email,role')
+                    .eq('company_id', company.id)
+                    .in('role', ['seller','manager'])
+                  const list = ((usersData as any[]) || []).filter(u => u.id !== node.id)
+                  setCandidates(list)
+                  setReassignOpen(true)
+                  return
+                }
+              } catch {}
               if (!confirm('Silmek istediğinizden emin misiniz?')) return
               try {
                 // Prefer local API (updated logic), then fallback to remote base if configured
@@ -720,6 +748,64 @@ function TreeNode({ node, childrenFn, isDescendant, onAssign, onRefresh, visited
           </>
         )}
       </div>
+      {reassignOpen && (
+        <div className="mt-2 p-2 border rounded bg-neutral-50 dark:bg-neutral-800">
+          <div className="text-sm mb-2">Bu kişiye bağlı alacaklar mevcut. Kime aktarmak istersiniz?</div>
+          <div className="flex items-center gap-2">
+            <select value={reassignTarget} onChange={e=>setReassignTarget(e.target.value)} className="border rounded px-2 py-1 text-sm">
+              <option value="">Seçin</option>
+              {candidates.map(c => (<option key={c.id} value={c.id}>{c.full_name} ({c.role})</option>))}
+            </select>
+            <button className="text-xs px-2 py-1 rounded border" disabled={!reassignTarget || reassignBusy} onClick={async ()=>{
+              if (!company?.id || !reassignTarget) return
+              setReassignBusy(true)
+              try {
+                // local-first reassign
+                let ok = false
+                try {
+                  const r = await fetch('/api/debts/reassign-seller', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ company_id: company.id, from_user_id: node.id, target_user_id: reassignTarget }) })
+                  const ct = r.headers.get('content-type') || ''
+                  if (r.ok && ct.includes('application/json')) ok = true
+                } catch {}
+                if (!ok && import.meta.env.DEV && apiBase && apiBase.length > 0) {
+                  const r2 = await fetch(`${apiBase}/api/debts/reassign-seller`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ company_id: company.id, from_user_id: node.id, target_user_id: reassignTarget }) })
+                  const ct2 = r2.headers.get('content-type') || ''
+                  if (!(r2.ok && ct2.includes('application/json'))) {
+                    const msg = ct2.includes('application/json') ? (await r2.json()).error : await r2.text()
+                    alert(msg || 'Aktarma başarısız')
+                    setReassignBusy(false)
+                    return
+                  }
+                }
+                // after reassign, proceed delete
+                if (!confirm('Silmek istediğinizden emin misiniz?')) { setReassignBusy(false); return }
+                let okDel = false
+                try {
+                  const respLocal = await fetch('/api/users/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: node.id, company_id: company.id }) })
+                  const ctLocal = respLocal.headers.get('content-type') || ''
+                  if (respLocal.ok && ctLocal.includes('application/json')) { okDel = true }
+                } catch {}
+                if (!okDel && import.meta.env.DEV && apiBase && apiBase.length > 0) {
+                  const respRemote = await fetch(`${apiBase}/api/users/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: node.id, company_id: company.id }) })
+                  const ctRemote = respRemote.headers.get('content-type') || ''
+                  if (!(respRemote.ok && ctRemote.includes('application/json'))) {
+                    const msg = ctRemote.includes('application/json') ? (await respRemote.json()).error : await respRemote.text()
+                    alert(msg || 'Silme başarısız')
+                    setReassignBusy(false)
+                    return
+                  }
+                }
+                setReassignOpen(false)
+                await onRefresh()
+              } catch (e: any) {
+                alert(e?.message || 'Ağ hatası')
+              }
+              setReassignBusy(false)
+            }}>Aktar ve Sil</button>
+            <button className="text-xs px-2 py-1 rounded border" onClick={()=>{ setReassignOpen(false); setReassignTarget('') }}>İptal</button>
+          </div>
+        </div>
+      )}
       {err && <div className="text-xs text-red-600 mt-1">{err}</div>}
       {kids.length > 0 && (
         <div className="pl-4 mt-1 space-y-1">
