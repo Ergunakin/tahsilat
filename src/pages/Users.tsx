@@ -21,7 +21,8 @@ interface UserRow {
 
 export default function Users() {
   const { company } = useTenant()
-  const apiBase = ''
+  const rawApiBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+  const apiBase = rawApiBase ? rawApiBase.replace(/\/+$/, '') : undefined
   const [bulkResult, setBulkResult] = useState<any[]>([])
   const [users, setUsers] = useState<UserRow[]>([])
   const managers = useMemo(() => users.filter(u => u.role === 'manager' || u.role === 'admin').sort((a,b)=>a.full_name.localeCompare(b.full_name)), [users])
@@ -99,7 +100,11 @@ export default function Users() {
     setMsg(null)
     if (!company?.id) { setMsg('Şirket yüklenmedi'); return }
     try {
-      const resp = await fetch(`/api/users/create`, {
+      let url = `/api/users/create`
+      if (import.meta.env.DEV) {
+        if (apiBase && apiBase.length > 0) url = `${apiBase}/api/users/create`
+      }
+      const resp = await fetch(url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ full_name: fullName, email, role, company_id: company.id })
       })
@@ -128,7 +133,11 @@ export default function Users() {
     if (!company?.id) { setMsg('Şirket yüklenmedi'); return }
     const items = bulkItems.map(i => ({ full_name: i.full_name, email: i.email, role: i.role }))
     try {
-      const resp = await fetch(`/api/users/bulk`, {
+      let url = `/api/users/bulk`
+      if (import.meta.env.DEV) {
+        if (apiBase && apiBase.length > 0) url = `${apiBase}/api/users/bulk`
+      }
+      const resp = await fetch(url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company_id: company.id, items })
       })
@@ -185,7 +194,11 @@ export default function Users() {
                             const body = { id: u.id, company_id: company?.id, full_name: editFullName, email: editEmail, role: editRole }
                             setSavingId(u.id)
                             try {
-                              const resp = await fetch('/api/users/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+                              let url = '/api/users/update'
+                              if (import.meta.env.DEV) {
+                                if (apiBase && apiBase.length > 0) url = `${apiBase}/api/users/update`
+                              }
+                              const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
                               const ct = resp.headers.get('content-type') || ''
                               const isJson = ct.includes('application/json')
                               const json = isJson ? await resp.json() : { error: await resp.text() }
@@ -212,7 +225,11 @@ export default function Users() {
                           if (!company?.id) return
                           if (!confirm('Silmek istediğinize emin misiniz?')) return
                           try {
-                            const resp = await fetch('/api/users/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: u.id, company_id: company.id }) })
+                            let url = '/api/users/delete'
+                            if (import.meta.env.DEV) {
+                              if (apiBase && apiBase.length > 0) url = `${apiBase}/api/users/delete`
+                            }
+                            const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: u.id, company_id: company.id }) })
                             const ct = resp.headers.get('content-type') || ''
                             const isJson = ct.includes('application/json')
                             const json = isJson ? await resp.json() : { error: await resp.text() }
@@ -225,7 +242,11 @@ export default function Users() {
                       >×</button>
                     </div>
                   </td>
-                  <td className="p-2">{u.full_name}</td>
+                  <td className="p-2">
+                    {editingId === u.id ? (
+                      <input value={editFullName} onChange={e=>setEditFullName(e.target.value)} className="border rounded px-2 py-1 w-full" />
+                    ) : u.full_name}
+                  </td>
                   <td className="p-2">
                     {editingId === u.id ? (
                       <input value={editEmail} onChange={e=>setEditEmail(e.target.value)} className="border rounded px-2 py-1 w-full" />

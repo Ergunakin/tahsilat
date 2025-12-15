@@ -12,7 +12,9 @@ export default async function handler(req: any, res: any) {
   if (!id || !company_id) return res.status(400).json({ error: 'Missing id/company_id' })
   try {
     const { error: delAuthErr } = await admin.auth.admin.deleteUser(id)
-    if (delAuthErr) return res.status(500).json({ error: delAuthErr.message })
+    if (delAuthErr && !String(delAuthErr.message || '').toLowerCase().includes('not found')) {
+      return res.status(500).json({ error: delAuthErr.message })
+    }
     const { error: delRowErr } = await admin
       .from('users')
       .delete()
@@ -24,4 +26,3 @@ export default async function handler(req: any, res: any) {
     return res.status(500).json({ error: e?.message || 'Server error' })
   }
 }
-

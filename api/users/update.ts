@@ -11,6 +11,15 @@ export default async function handler(req: any, res: any) {
   const { id, company_id, email, full_name, role } = req.body || {}
   if (!id || !company_id) return res.status(400).json({ error: 'Missing id/company_id' })
   try {
+    const { data: existingRow, error: rowFetchErr } = await admin
+      .from('users')
+      .select('id,email,full_name,role')
+      .eq('id', id)
+      .eq('company_id', company_id)
+      .maybeSingle()
+    if (rowFetchErr) return res.status(500).json({ error: rowFetchErr.message })
+    if (!existingRow) return res.status(404).json({ error: 'User not found' })
+
     if (email || full_name || role) {
       const attrs: any = {}
       if (email) attrs.email = email
@@ -20,7 +29,10 @@ export default async function handler(req: any, res: any) {
       if (Object.keys(meta).length) attrs.user_metadata = meta
       if (Object.keys(attrs).length) {
         const { error: updErr } = await admin.auth.admin.updateUserById(id, attrs)
-        if (updErr) return res.status(500).json({ error: updErr.message })
+        if (updErr && !String(updErr.message || '').toLowerCase().includes('not found')) {
+          return res.status(500).json({ error: updErr.message })
+        }
+        // if not found in auth, continue to update row only
       }
     }
     const updateRow: any = {}
@@ -40,4 +52,3 @@ export default async function handler(req: any, res: any) {
     return res.status(500).json({ error: e?.message || 'Server error' })
   }
 }
-
