@@ -156,31 +156,60 @@ export default async function handler(req: any, res: any) {
         customer_id = created.id
       }
 
-      const { data: debtRow, error: debtErr } = await admin
+      // upsert by (customer_id, due_date)
+      const { data: existingDebt } = await admin
         .from('debts')
-        .insert({
-          customer_id,
-          company_id,
-          amount: amtNum,
-          currency: pgCurrency,
-          due_date: dueISO,
-          description: `type=${receivable_type}`,
-          seller_id,
-          remaining_amount: amtNum,
-          status: 'active',
+        .select('id,customer_id,amount,currency,due_date,seller_id,status,description,remaining_amount,created_at')
+        .eq('company_id', company_id)
+        .eq('customer_id', customer_id)
+        .eq('due_date', dueISO)
+        .limit(1)
+      const found = (existingDebt || [])[0]
+      if (found) {
+        const patch: any = {}
+        if (Number(found.amount) !== amtNum) patch.amount = amtNum
+        if ((found.currency || '').toUpperCase() !== pgCurrency.toUpperCase()) patch.currency = pgCurrency
+        const incomingDesc = `type=${receivable_type}`
+        if ((found.description || '') !== incomingDesc) patch.description = incomingDesc
+        if ((found.seller_id || null) !== (seller_id || null)) patch.seller_id = seller_id
+        if (Object.keys(patch).length) {
+          const { error: updErr } = await admin
+            .from('debts')
+            .update(patch)
+            .eq('id', found.id)
+          if (updErr) {
+            results.push({ error: updErr.message, customer_name })
+            continue
+          }
+        }
+        results.push({ ...found, amount: amtNum, currency: pgCurrency, description: `type=${receivable_type}`, seller_id, customer_name, seller_name, _action: 'updated' })
+      } else {
+        const { data: debtRow, error: debtErr } = await admin
+          .from('debts')
+          .insert({
+            customer_id,
+            company_id,
+            amount: amtNum,
+            currency: pgCurrency,
+            due_date: dueISO,
+            description: `type=${receivable_type}`,
+            seller_id,
+            remaining_amount: amtNum,
+            status: 'active',
+          })
+          .select('id,customer_id,amount,currency,due_date,seller_id,status,description,created_at')
+          .single()
+        if (debtErr || !debtRow) {
+          results.push({ error: debtErr?.message || 'Receivable insert failed', customer_name })
+          continue
+        }
+        results.push({
+          ...debtRow,
+          customer_name,
+          seller_name,
+          _action: 'inserted'
         })
-        .select('id,customer_id,amount,currency,due_date,seller_id,status,description,created_at')
-        .single()
-      if (debtErr || !debtRow) {
-        results.push({ error: debtErr?.message || 'Receivable insert failed', customer_name })
-        continue
       }
-
-      results.push({
-        ...debtRow,
-        customer_name,
-        seller_name,
-      })
     } catch (e: any) {
       results.push({ error: e?.message || 'Server error' })
     }
