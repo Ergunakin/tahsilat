@@ -64,6 +64,16 @@ export default async function handler(req: any, res: any) {
   const { action } = req.body || {}
   if (!action) return res.status(400).json({ error: 'Missing action' })
   try {
+    if (action === 'delete_all') {
+      const { company_id } = req.body || {}
+      if (!company_id) return res.status(400).json({ error: 'Missing company_id' })
+      const { error } = await admin
+        .from('debts')
+        .delete()
+        .eq('company_id', company_id)
+      if (error) return res.status(500).json({ error: error.message })
+      return res.status(200).json({ ok: true })
+    }
     if (action === 'delete') {
       const { company_id, id } = req.body || {}
       if (!company_id || !id) return res.status(400).json({ error: 'Missing company_id or id' })
@@ -146,4 +156,3 @@ export default async function handler(req: any, res: any) {
     return res.status(500).json({ error: e?.message || 'Server error' })
   }
 }
-

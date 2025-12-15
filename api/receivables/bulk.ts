@@ -199,7 +199,7 @@ export default async function handler(req: any, res: any) {
             continue
           }
         }
-        results.push({ ...found, amount: amtNum, currency: pgCurrency, description: `type=${receivable_type}`, seller_id, customer_name, seller_name, _action: 'updated' })
+        results.push({ ...found, amount: amtNum, currency: pgCurrency, description: `type=${receivable_type}`, seller_id, customer_name, seller_name, _action: 'updated', message: sellerCreateMessage })
       } else {
         const { data: debtRow, error: debtErr } = await admin
           .from('debts')

@@ -490,7 +490,62 @@ export default function Receivables() {
                   <button className="text-xs" onClick={()=>setSortConfig({ key: 'created_at', type: 'numeric', dir: 'desc' })}>↓</button>
                 </span>
               </th>
-              <th className="text-left p-2"></th>
+              <th className="text-left p-2">
+                {(currentRole === 'admin' || currentRole === 'accountant') && (
+                  <button
+                    type="button"
+                    className="text-xs rounded px-2 py-1 border"
+                    onMouseDown={(e)=>{ e.stopPropagation() }}
+                    onClick={async (e)=>{
+                      e.stopPropagation(); e.preventDefault()
+                      if (!company?.id) return
+                      if (!confirm('Tüm alacakları silmek istediğinizden emin misiniz?')) return
+                      const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+                      const apiBase = rawBase ? rawBase.replace(/\/+$/, '') : undefined
+                      let ok = false
+                      try {
+                        const rLocal = await fetch('/api/receivables/manage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete_all', company_id: company.id }) })
+                        const ctLocal = rLocal.headers.get('content-type') || ''
+                        if (rLocal.ok && ctLocal.includes('application/json')) ok = true
+                      } catch {}
+                      if (!ok && import.meta.env.DEV && apiBase && apiBase.length > 0) {
+                        const rRemote = await fetch(`${apiBase}/api/receivables/manage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete_all', company_id: company.id }) })
+                        const ctRemote = rRemote.headers.get('content-type') || ''
+                        if (!(rRemote.ok && ctRemote.includes('application/json'))) {
+                          const msg = ctRemote.includes('application/json') ? (await rRemote.json()).error : await rRemote.text()
+                          alert(msg || 'Silme hatası')
+                          return
+                        }
+                      }
+                      const { data } = await supabase
+                        .from('debts')
+                        .select('id,customer_id,amount,currency,due_date,seller_id,status,description,created_at')
+                        .eq('company_id', company.id)
+                        .order('due_date', { ascending: true })
+                      const rows = (data as any[] || []) as DebtRow[]
+                      const custIds = Array.from(new Set(rows.map(r => r.customer_id).filter(Boolean))) as string[]
+                      const sellerIds = Array.from(new Set(rows.map(r => r.seller_id).filter(Boolean))) as string[]
+                      let custMap: Record<string,string> = {}
+                      let sellerMap: Record<string,string> = {}
+                      if (custIds.length) {
+                        const { data: custs } = await supabase
+                          .from('customers')
+                          .select('id,name')
+                          .in('id', custIds)
+                        custMap = Object.fromEntries((custs || []).map(c => [c.id, c.name]))
+                      }
+                      if (sellerIds.length) {
+                        const { data: us } = await supabase
+                          .from('users')
+                          .select('id,full_name')
+                          .in('id', sellerIds)
+                        sellerMap = Object.fromEntries((us || []).map(u => [u.id, u.full_name]))
+                          }
+                          setDebts(rows.map(r => ({ ...r, customer_name: custMap[r.customer_id], seller_name: r.seller_id ? sellerMap[r.seller_id] : undefined })))
+                    }}
+                  >Tümünü Sil</button>
+                )}
+              </th>
               <th className="text-left p-2"></th>
             </tr>
             <tr>
@@ -575,18 +630,29 @@ export default function Receivables() {
                       </td>
                       <td className="p-2">
                         {(currentRole === 'admin' || currentRole === 'accountant') && (
-                          <button className="text-xs rounded px-2 py-1 border" onClick={async ()=>{
+                          <button type="button" className="text-xs rounded px-2 py-1 border"
+                            onMouseDown={(e)=>{ e.stopPropagation() }}
+                            onClick={async (e)=>{
+                            e.stopPropagation(); e.preventDefault()
                             if (!company?.id) return
                             if (!confirm('Silmek istediğinizden emin misiniz?')) return
-                            let url = '/api/receivables/manage'
                             const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
                             const apiBase = rawBase ? rawBase.replace(/\/+$/, '') : undefined
-                            if (import.meta.env.DEV && apiBase && apiBase.length > 0) url = `${apiBase}/api/receivables/manage`
-                            const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', company_id: company.id, id: d.id }) })
-                            const ct = resp.headers.get('content-type') || ''
-                            const isJson = ct.includes('application/json')
-                            const json = isJson ? await resp.json() : { error: await resp.text() }
-                            if (!resp.ok) { alert(json.error || 'Silme hatası'); return }
+                            let ok = false
+                            try {
+                              const rLocal = await fetch('/api/receivables/manage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', company_id: company.id, id: d.id }) })
+                              const ctLocal = rLocal.headers.get('content-type') || ''
+                              if (rLocal.ok && ctLocal.includes('application/json')) ok = true
+                            } catch {}
+                            if (!ok && import.meta.env.DEV && apiBase && apiBase.length > 0) {
+                              const rRemote = await fetch(`${apiBase}/api/receivables/manage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', company_id: company.id, id: d.id }) })
+                              const ctRemote = rRemote.headers.get('content-type') || ''
+                              if (!(rRemote.ok && ctRemote.includes('application/json'))) {
+                                const msg = ctRemote.includes('application/json') ? (await rRemote.json()).error : await rRemote.text()
+                                alert(msg || 'Silme hatası')
+                                return
+                              }
+                            }
                             const { data } = await supabase
                               .from('debts')
                               .select('id,customer_id,amount,currency,due_date,seller_id,status,description,created_at')
