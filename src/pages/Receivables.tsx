@@ -283,6 +283,34 @@ export default function Receivables() {
     setBulkItems(mapped)
   }
 
+  const bulkPreview = useMemo(() => {
+    return bulkItems.map((i: any) => {
+      const name = String(i.customer_name || '').trim()
+      const dd = normalizeDate(i.due_date)
+      let action: 'insert' | 'update' | 'no_change' = 'insert'
+      let diffs: string[] = []
+      const existing = debts.find(d => (d.customer_name || '').trim() === name && d.due_date === dd)
+      if (existing) {
+        action = 'update'
+        const amtNew = Number(i.amount)
+        const amtOld = Number(existing.amount)
+        if (isFinite(amtNew) && amtNew !== amtOld) diffs.push('amount')
+        const currNewKey = String(i.currency || '').trim().toUpperCase()
+        const currNewPg = (currNewKey === 'TL' || currNewKey === 'TRY') ? 'TRY' : currNewKey
+        const currOld = String(existing.currency || '').trim().toUpperCase()
+        if (currNewPg && currNewPg !== currOld) diffs.push('currency')
+        const typeNew = String(i.receivable_type || '').trim()
+        const typeOld = String(getTypeFromDesc(existing.description) || '').trim()
+        if (typeNew && typeNew !== typeOld) diffs.push('type')
+        const sellerNew = String(i.seller || '').trim()
+        const sellerOld = String(existing.seller_name || '').trim()
+        if (sellerNew && sellerNew !== sellerOld) diffs.push('seller')
+        if (diffs.length === 0) action = 'no_change'
+      }
+      return { ...i, due_date: dd, _action: action, _diffs: diffs }
+    })
+  }, [bulkItems, debts])
+
   const submitBulk = async () => {
     setBulkMsg(null)
     if (!company?.id) { setBulkMsg('Şirket yok'); return }
@@ -491,11 +519,11 @@ export default function Receivables() {
                       <td className="p-2"><select value={editSellerId} onChange={e=>setEditSellerId(e.target.value)} className="border rounded px-2 py-1 w-full"><option value="">—</option>{sellers.map(s => (<option key={s.id} value={s.id}>{s.full_name}</option>))}</select></td>
                       <td className="p-2"><button className="text-xs rounded px-2 py-1 border" onClick={async ()=>{
                         if (!company?.id) return
-                        let url = '/api/receivables/update'
+                        let url = '/api/receivables/manage'
                         const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
                         const apiBase = rawBase ? rawBase.replace(/\/+$/, '') : undefined
-                        if (import.meta.env.DEV && apiBase && apiBase.length > 0) url = `${apiBase}/api/receivables/update`
-                        const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ company_id: company.id, id: d.id, customer_name: editCustomer, due_date: editDueDate, amount: Number(editAmount), currency: editCurrency, receivable_type: editType, seller_id: editSellerId }) })
+                        if (import.meta.env.DEV && apiBase && apiBase.length > 0) url = `${apiBase}/api/receivables/manage`
+                        const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', company_id: company.id, id: d.id, customer_name: editCustomer, due_date: editDueDate, amount: Number(editAmount), currency: editCurrency, receivable_type: editType, seller_id: editSellerId }) })
                         const ct = resp.headers.get('content-type') || ''
                         const isJson = ct.includes('application/json')
                         const json = isJson ? await resp.json() : { error: await resp.text() }
@@ -550,11 +578,11 @@ export default function Receivables() {
                           <button className="text-xs rounded px-2 py-1 border" onClick={async ()=>{
                             if (!company?.id) return
                             if (!confirm('Silmek istediğinizden emin misiniz?')) return
-                            let url = '/api/receivables/delete'
+                            let url = '/api/receivables/manage'
                             const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
                             const apiBase = rawBase ? rawBase.replace(/\/+$/, '') : undefined
-                            if (import.meta.env.DEV && apiBase && apiBase.length > 0) url = `${apiBase}/api/receivables/delete`
-                            const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ company_id: company.id, id: d.id }) })
+                            if (import.meta.env.DEV && apiBase && apiBase.length > 0) url = `${apiBase}/api/receivables/manage`
+                            const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', company_id: company.id, id: d.id }) })
                             const ct = resp.headers.get('content-type') || ''
                             const isJson = ct.includes('application/json')
                             const json = isJson ? await resp.json() : { error: await resp.text() }
@@ -609,8 +637,12 @@ export default function Receivables() {
           <div className="rounded border p-3">
             <div className="font-medium mb-2">{t('preview')} ({bulkItems.length})</div>
             <ul className="text-sm space-y-1">
-              {bulkItems.map((i, idx) => (
-                <li key={idx}>{i.customer_name} - {i.amount} {i.currency} - {i.receivable_type}</li>
+              {bulkPreview.map((i: any, idx: number) => (
+                <li key={idx}>
+                  {i.customer_name} - {i.amount} {i.currency} - {i.receivable_type} — [
+                  {i._action === 'insert' ? 'Eklenecek' : i._action === 'update' ? `Güncellenecek: ${i._diffs.length ? i._diffs.join(', ') : '-'}` : 'Değişiklik yok'}
+                  ]
+                </li>
               ))}
             </ul>
           </div>
@@ -626,6 +658,7 @@ export default function Receivables() {
                   <th className="text-left p-2">{t('amount')}</th>
                   <th className="text-left p-2">{t('currency')}</th>
                   <th className="text-left p-2">{t('debt_type')}</th>
+                  <th className="text-left p-2">Mesaj</th>
                   <th className="text-left p-2">{t('assign_error')}</th>
                 </tr>
               </thead>
@@ -637,6 +670,7 @@ export default function Receivables() {
                     <td className="p-2">{r.amount ?? '—'}</td>
                     <td className="p-2">{r.currency ?? '—'}</td>
                     <td className="p-2">{r.description ? String(r.description).replace('type=','') : '—'}</td>
+                    <td className="p-2 text-blue-600">{r.message || ''}</td>
                     <td className="p-2 text-red-600">{r.error || ''}</td>
                   </tr>
                 ))}

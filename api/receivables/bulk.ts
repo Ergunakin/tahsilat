@@ -17,6 +17,11 @@ function slugifyName(name: string) {
     .replace(/^-+|-+$/g, '')
 }
 
+function genPassword() {
+  const n = Math.floor(100000 + Math.random() * 900000)
+  return String(n)
+}
+
 function excelSerialToISODate(n: number) {
   const ms = Math.round((n - 25569) * 86400 * 1000)
   const d = new Date(ms)
@@ -112,6 +117,8 @@ export default async function handler(req: any, res: any) {
         continue
       }
 
+      let sellerCreateMessage: string | undefined
+
       // resolve seller id by name within company
       const { data: sellerRow } = await admin
         .from('users')
@@ -123,16 +130,26 @@ export default async function handler(req: any, res: any) {
       if (!seller_id) {
         const emailLocal = `seller-${slugifyName(String(seller_name))}-${String(company_id).slice(0,8)}`
         const email = `${emailLocal}@example.local`
-        const { data: createdSeller, error: sellerErr } = await admin
-          .from('users')
-          .insert({ email, full_name: String(seller_name).trim(), role: 'seller', company_id })
-          .select('id')
-          .single()
-        if (sellerErr || !createdSeller) {
-          results.push({ error: sellerErr?.message || 'Seller create failed', seller_name, customer_name })
+        const tempPassword = genPassword()
+        const { data: createdAuth, error: authErr } = await admin.auth.admin.createUser({
+          email,
+          password: tempPassword,
+          email_confirm: true,
+          user_metadata: { full_name: String(seller_name).trim(), role: 'seller', company_id }
+        })
+        if (authErr || !createdAuth?.user?.id) {
+          results.push({ error: authErr?.message || 'Auth create failed', seller_name, customer_name })
           continue
         }
-        seller_id = createdSeller.id
+        seller_id = createdAuth.user.id
+        const { error: sellerRowErr } = await admin
+          .from('users')
+          .insert({ id: seller_id, email, full_name: String(seller_name).trim(), role: 'seller', company_id })
+        if (sellerRowErr) {
+          results.push({ error: sellerRowErr.message || 'Seller row create failed', seller_name, customer_name })
+          continue
+        }
+        sellerCreateMessage = `Yeni kullanıcı eklendi: ${email} | Geçici şifre: ${tempPassword}`
       }
 
       // find or create customer
@@ -207,7 +224,8 @@ export default async function handler(req: any, res: any) {
           ...debtRow,
           customer_name,
           seller_name,
-          _action: 'inserted'
+          _action: 'inserted',
+          message: sellerCreateMessage
         })
       }
     } catch (e: any) {
